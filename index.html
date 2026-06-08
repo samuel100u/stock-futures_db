@@ -116,6 +116,11 @@
         .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.8); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
         .modal-overlay.active { display: flex; }
         .modal-container { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 1.5rem; max-width: 500px; width: 100%; max-height: 90vh; overflow-y: auto; position: relative; }
+
+        .tag-chip { background: rgba(16, 185, 129, 0.12); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.25); padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .tag-rank-row { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #1e293b; }
+        .tag-rank-bar { width: 64px; height: 6px; background: #1e293b; border-radius: 99px; overflow: hidden; flex-shrink: 0; }
+        .tag-rank-bar-fill { height: 100%; background: #10b981; border-radius: 99px; }
     </style>
 </head>
 <body class="p-3 md:p-8" data-active-tab="overview" data-mode="volume">
@@ -145,7 +150,7 @@
                         <div class="mode-switch-container" id="mode-selector">
                             <div class="mode-slider"></div>
                             <div class="mode-option active" data-val="volume">成交量</div>
-                            <div class="mode-option" data-val="value">成交值</div>
+                            <div class="mode-option" data-val="value">成交金額</div>
                         </div>
                     </div>
                 </div>
@@ -245,7 +250,12 @@
                             </table>
                         </div>
                     </div>
-                    <div class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl"><h4 class="text-base md:text-lg font-bold text-slate-200 mb-4 md:mb-6 flex items-center gap-2"><i data-lucide="pie-chart" class="text-emerald-400"></i> 標的產業佔比</h4><div class="chart-container"><canvas id="sectorChart"></canvas></div></div>
+                    <div class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
+                        <h4 class="text-base md:text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><i data-lucide="list-ordered" class="text-emerald-400"></i> 題材排行</h4>
+                        <div id="tag-rank-list" class="scrollable-table text-sm">
+                            <div class="text-slate-500 text-center py-8">尚無資料</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -255,7 +265,7 @@
                     <div><h4 class="text-lg md:text-xl font-bold mb-1 flex items-center gap-2"><i data-lucide="activity" class="text-indigo-400"></i> 量能異常篩選</h4><p id="surge-desc" class="text-slate-400 text-xs md:text-sm">近期均量 vs 基準日前回推一年的歷史平均。</p></div>
                     <div class="flex items-center gap-3"><div id="surge-count-badge" class="bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-lg text-xs font-bold">-- 筆符合</div><button onclick="copySurgePrompt()" class="bg-white/10 hover:bg-white/20 text-white px-4 py-1.5 rounded-lg text-xs font-bold border border-white/20 flex items-center gap-2 transition"><i data-lucide="copy" size="14"></i> 複製 AI 分析 Prompt</button></div>
                 </div>
-                <div class="glass-card rounded-2xl md:rounded-3xl overflow-hidden shadow-sm"><div class="scrollable-table"><table class="w-full text-left text-xs md:text-sm"><thead class="sticky top-0 z-10"><tr><th class="px-4 py-3 font-bold">標的名稱</th><th class="px-4 py-3 font-bold">產業</th><th class="px-4 py-3 font-bold text-right">歷史均量 (1y)</th><th class="px-4 py-3 font-bold text-right">近期均量</th><th class="px-4 py-3 font-bold text-right">倍數</th><th class="px-4 py-3 font-bold text-center">看圖</th></tr></thead><tbody id="surge-table-body" class="divide-y divide-slate-800"></tbody></table></div><div id="surge-empty" class="p-8 text-center text-slate-500 text-sm">暫無符合條件之數據</div></div>
+                <div class="glass-card rounded-2xl md:rounded-3xl overflow-hidden shadow-sm"><div class="scrollable-table"><table class="w-full text-left text-xs md:text-sm"><thead class="sticky top-0 z-10"><tr><th class="px-4 py-3 font-bold">標的名稱</th><th class="px-4 py-3 font-bold">題材</th><th class="px-4 py-3 font-bold text-right">歷史均量 (1y)</th><th class="px-4 py-3 font-bold text-right">近期均量</th><th class="px-4 py-3 font-bold text-right">倍數</th><th class="px-4 py-3 font-bold text-center">看圖</th></tr></thead><tbody id="surge-table-body" class="divide-y divide-slate-800"></tbody></table></div><div id="surge-empty" class="p-8 text-center text-slate-500 text-sm">暫無符合條件之數據</div></div>
             </div>
 
             <!-- 處置股監控分頁 -->
@@ -293,11 +303,14 @@
 
             <!-- 個股價量回測（市場概況 / 量能異動 / 處置股共用，切換分頁不隱藏） -->
             <div id="shared-stock-analysis" class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
-                <div class="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 border-b border-slate-800 pb-4 md:pb-6">
-                    <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
-                        <i data-lucide="search" class="text-blue-400"></i> 個股價量回測分析
-                    </h4>
-                    <div class="flex-1 max-w-full md:max-w-md md:ml-8">
+                <div class="flex flex-col md:flex-row md:items-start justify-between mb-4 gap-4 border-b border-slate-800 pb-4 md:pb-6">
+                    <div class="flex-1 min-w-0">
+                        <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="search" class="text-blue-400"></i> 個股價量回測分析
+                        </h4>
+                        <div id="stock-analysis-meta" class="mt-3 text-sm text-slate-400">請選擇標的查看價量與題材</div>
+                    </div>
+                    <div class="w-full md:w-72 md:flex-shrink-0">
                         <select id="stock-selector" placeholder="搜尋代碼或名稱..."></select>
                     </div>
                 </div>
@@ -332,7 +345,8 @@
         /**
          * 💎 定義與組件初始化
          */
-        let db = null, sectorChart = null, priceChart = null, stockSelectInstance = null;
+        let db = null, priceChart = null, stockSelectInstance = null;
+        let stockTagsMap = {};
         let currentStrongList = [], currentSurgeList = [], currentReferenceDate = "", currentReferenceTimestamp = 0;
         let currentAnalysisPeriodStart = 0, currentAvgDays = 1;
         let blacklist = JSON.parse(localStorage.getItem('stock_blacklist') || '[]');
@@ -361,11 +375,80 @@
 
         function showToast(msg) { const t = document.getElementById('toast'); if(!t) return; document.getElementById('toast-msg').innerText = msg; t.classList.remove('translate-y-20', 'opacity-0'); setTimeout(() => t.classList.add('translate-y-20', 'opacity-0'), 3000); }
 
-        function formatValue(val) {
+        function escapeHtml(text) {
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function renderTagRankList(tagCounts) {
+            const container = document.getElementById('tag-rank-list');
+            if (!container) return;
+            const entries = Object.entries(tagCounts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-Hant'));
+            if (!entries.length) {
+                container.innerHTML = '<div class="text-slate-500 text-center py-8">尚無強勢標的</div>';
+                return;
+            }
+            const max = entries[0][1];
+            container.innerHTML = entries.map(([tag, count], i) => {
+                const pct = Math.max(8, Math.round((count / max) * 100));
+                return `<div class="tag-rank-row">
+                    <span class="w-6 text-xs font-bold ${i < 3 ? 'text-emerald-400' : 'text-slate-500'}">${i + 1}</span>
+                    <span class="flex-1 text-slate-200 truncate" title="${escapeHtml(tag)}">${escapeHtml(tag)}</span>
+                    <span class="text-xs font-mono font-bold text-emerald-400 w-6 text-right">${count}</span>
+                    <div class="tag-rank-bar"><div class="tag-rank-bar-fill" style="width:${pct}%"></div></div>
+                </div>`;
+            }).join('');
+        }
+
+        function updateStockAnalysisMeta(stockId) {
+            const el = document.getElementById('stock-analysis-meta');
+            if (!el || !stockId) return;
+            let name = '';
+            if (db) {
+                try {
+                    const res = db.exec(`SELECT name FROM market_data WHERE stockId = '${stockId}' LIMIT 1`);
+                    if (res.length && res[0].values.length) name = res[0].values[0][0];
+                } catch (e) { /* ignore */ }
+            }
+            const tags = getTagsForStock(stockId);
+            const tagHtml = tags.length
+                ? tags.map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('')
+                : '<span class="text-slate-500 text-xs">尚無題材標籤</span>';
+            el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-2">
+                <span class="font-bold text-slate-100 text-base">${escapeHtml(stockId)}</span>
+                ${name ? `<span class="text-slate-400">${escapeHtml(name)}</span>` : ''}
+            </div><div class="flex flex-wrap gap-1.5">${tagHtml}</div>`;
+        }
+
+        // 成交金額（百萬）：小型 1口=100股，標準 1口=2000股 → 元 / 1e6
+        const TRADE_VALUE_M_SQL = `(volume * close * CASE WHEN name LIKE '%小型%' THEN 100 ELSE 2000 END) / 1000000.0`;
+
+        function formatTradeValueMillion(val) {
             if (val === null || val === undefined || isNaN(val)) return "0";
-            if (val >= 100000000) return (val / 100000000).toFixed(2) + ' 億';
-            if (val >= 10000) return (val / 10000).toFixed(1) + ' 萬';
-            return Math.round(val).toLocaleString();
+            if (val >= 100) return (val / 100).toFixed(2) + ' 億';
+            return val.toFixed(1) + ' 百萬';
+        }
+
+        function applyOverviewThresholdForMode(mode) {
+            const inp = document.getElementById('param-min-threshold-overview');
+            const label = document.getElementById('overview-threshold-label');
+            if (!inp || !label) return;
+            if (mode === 'value') {
+                label.innerText = '最低成交金額(百萬)';
+                inp.step = '1';
+                inp.min = '0';
+            } else {
+                label.innerText = '最低成交量';
+                inp.step = '1000';
+                inp.min = '0';
+            }
+        }
+
+        function syncThresholdInputOnModeSwitch(oldMode, newMode) {
+            const inp = document.getElementById('param-min-threshold-overview');
+            if (!inp) return;
+            inp.dataset[oldMode + 'Threshold'] = inp.value;
+            inp.value = inp.dataset[newMode + 'Threshold'] || (newMode === 'value' ? '100' : '1000');
+            applyOverviewThresholdForMode(newMode);
         }
 
         function tryAnalyze() { if(!db) return; try { processOverview(); processSurgeAnalysis(); renderBlacklist(); } catch (e) { console.error("分析錯誤:", e); showToast("分析執行出錯"); } }
@@ -487,15 +570,16 @@
         });
 
         document.getElementById('mode-selector').addEventListener('click', () => {
-            const newMode = document.body.getAttribute('data-mode') === 'volume' ? 'value' : 'volume';
+            const oldMode = document.body.getAttribute('data-mode') || 'volume';
+            const newMode = oldMode === 'volume' ? 'value' : 'volume';
+            syncThresholdInputOnModeSwitch(oldMode, newMode);
             document.body.setAttribute('data-mode', newMode);
             document.querySelectorAll('.mode-option').forEach(opt => opt.classList.toggle('active', opt.dataset.val === newMode));
             
             const params = getParams();
             const prefix = params.avgDays > 1 ? `平均` : ``;
-            document.getElementById('overview-threshold-label').innerText = newMode === 'value' ? `最低成交金額` : `最低成交量`;
-            document.getElementById('th-dynamic-metric').innerText = newMode === 'value' ? `${prefix}成交值` : `${prefix}成交量`;
-            document.getElementById('stat-vol-label').innerText = newMode === 'value' ? `基準日成交值` : `基準日成交量`;
+            document.getElementById('th-dynamic-metric').innerText = newMode === 'value' ? `${prefix}成交金額(百萬)` : `${prefix}成交量`;
+            document.getElementById('stat-vol-label').innerText = newMode === 'value' ? `基準日成交金額(百萬)` : `基準日成交量`;
             
             if(db) tryAnalyze();
         });
@@ -568,10 +652,57 @@
             }
         }
 
+        function normalizeStockCode(id) {
+            const s = String(id || '').trim();
+            const m = s.match(/^(\d{4})/);
+            return m ? m[1] : s;
+        }
+
+        function loadStockTagsMap() {
+            stockTagsMap = {};
+            if (!db) return;
+            try {
+                const res = db.exec(`
+                    SELECT st.stock_code, t.name
+                    FROM stock_tags st
+                    JOIN tags t ON t.id = st.tag_id
+                    ORDER BY st.stock_code, t.name
+                `);
+                if (res.length) {
+                    res[0].values.forEach(([code, name]) => {
+                        if (!stockTagsMap[code]) stockTagsMap[code] = [];
+                        stockTagsMap[code].push(name);
+                    });
+                }
+            } catch (e) {
+                console.warn('stock_tags 未載入，可能為舊版 DB', e);
+            }
+        }
+
+        function getTagsForStock(stockId) {
+            return stockTagsMap[normalizeStockCode(stockId)] || [];
+        }
+
+        function getPrimaryTag(stockId) {
+            const tags = getTagsForStock(stockId);
+            return tags.length ? tags[0] : '未標記';
+        }
+
+        function getTagsLabel(stockId) {
+            const tags = getTagsForStock(stockId);
+            return tags.length ? tags.join('、') : '—';
+        }
+
+        function isFinanceStock(stockId, name) {
+            const n = (name || '');
+            return /金控|銀行|保險|證券|金融/.test(n);
+        }
+
         async function loadDatabase(uint8Array) {
             try {
                 const SQL = await sqlPromise;
                 db = new SQL.Database(uint8Array);
+                loadStockTagsMap();
                 document.getElementById('welcome-screen').classList.add('hidden');
                 document.getElementById('dashboard-content').classList.remove('hidden');
                 document.getElementById('settings-panel').classList.remove('hidden');
@@ -614,9 +745,9 @@
             }
         }
 
-        function isETF(id, name, sector) {
-            const n = (name || "").toUpperCase(); const s = (sector || "").toUpperCase(); const i = (id || "").toString();
-            return n.includes('ETF') || i.startsWith('00') || s.includes('受益') || s.includes('存託');
+        function isETF(id, name) {
+            const n = (name || "").toUpperCase(); const i = (id || "").toString();
+            return n.includes('ETF') || i.startsWith('00') || n.includes('受益') || n.includes('存託');
         }
 
         // 💎 市場概況核心邏輯：支援當日漲幅 vs 波段漲幅智慧切換
@@ -634,16 +765,17 @@
             currentAvgDays = p.avgDays;
 
             const latestDataMap = {};
-            const baseRes = db.exec(`SELECT m.stockId, m.name, m.close, m.previousClose, s.產業組別 FROM market_data m LEFT JOIN sector_map s ON m.stockId = s.stock_id WHERE m.tradeDate = ${latestDate}`);
+            const baseRes = db.exec(`SELECT m.stockId, m.name, m.close, m.previousClose FROM market_data m WHERE m.tradeDate = ${latestDate}`);
             if (baseRes.length) baseRes[0].values.forEach(v => { latestDataMap[v[0]] = v; });
 
-            const multiDayRes = db.exec(`SELECT stockId, volume, (volume * close * 1000) as val, close FROM market_data WHERE tradeDate IN (${targetDates.join(',')})`);
+            const multiDayRes = db.exec(`SELECT stockId, volume, ${TRADE_VALUE_M_SQL} as val_m, close FROM market_data WHERE tradeDate IN (${targetDates.join(',')})`);
             const stats = {};
             if (multiDayRes.length) {
                 multiDayRes[0].values.forEach(v => {
                     const id = v[0];
                     if (!stats[id]) stats[id] = { volSum: 0, valSum: 0, count: 0, minClose: Infinity, maxClose: -Infinity };
-                    stats[id].volSum += v[1]; stats[id].valSum += v[2];
+                    stats[id].volSum += v[1];
+                    stats[id].valSum += v[2];
                     stats[id].minClose = Math.min(stats[id].minClose, v[3]);
                     stats[id].maxClose = Math.max(stats[id].maxClose, v[3]);
                     stats[id].count += 1;
@@ -666,10 +798,10 @@
 
                 const metric = p.mode === 'value' ? stats[id].valSum / stats[id].count : stats[id].volSum / stats[id].count;
                 if (gain < p.changePct || metric < p.minThreshold) continue;
-                if (p.excludeETF && isETF(id, base[1], base[4])) continue;
-                if (p.excludeFinance && base[4] && base[4].includes('金融')) continue;
+                if (p.excludeETF && isETF(id, base[1])) continue;
+                if (p.excludeFinance && isFinanceStock(id, base[1])) continue;
                 if (blacklist.find(b => b.id === id)) continue;
-                validStocks.push({ id, name: base[1], close: base[2], sector: base[4], avgMetric: metric, gain });
+                validStocks.push({ id, name: base[1], close: base[2], tags: getTagsLabel(id), primaryTag: getPrimaryTag(id), avgMetric: metric, gain });
             }
 
             validStocks.sort((a, b) => b.avgMetric - a.avgMetric);
@@ -681,14 +813,14 @@
 
             document.getElementById('stat-stocks').innerText = Object.keys(latestDataMap).length;
             document.getElementById('stat-date').innerText = currentReferenceDate;
-            const totalMetricRes = db.exec(`SELECT ${p.mode === 'value' ? 'SUM(volume * close * 1000)' : 'SUM(volume)'} FROM market_data WHERE tradeDate = ${latestDate}`);
-            document.getElementById('stat-volume').innerText = p.mode === 'value' ? formatValue(totalMetricRes[0].values[0][0]) : (totalMetricRes[0].values[0][0] || 0).toLocaleString();
+            const totalMetricRes = db.exec(`SELECT ${p.mode === 'value' ? `SUM(${TRADE_VALUE_M_SQL})` : 'SUM(volume)'} FROM market_data WHERE tradeDate = ${latestDate}`);
+            document.getElementById('stat-volume').innerText = p.mode === 'value' ? formatTradeValueMillion(totalMetricRes[0].values[0][0]) : (totalMetricRes[0].values[0][0] || 0).toLocaleString();
             document.getElementById('stat-strong').innerText = validStocks.length;
 
             const tableBody = document.getElementById('strong-table-body'); tableBody.innerHTML = '';
             validStocks.forEach(v => {
                 const tr = document.createElement('tr'); tr.className = 'hover:bg-slate-800 transition';
-                const displayMetric = p.mode === 'value' ? formatValue(v.avgMetric) : (v.avgMetric/1000).toFixed(0) + 'K';
+                const displayMetric = p.mode === 'value' ? formatTradeValueMillion(v.avgMetric) : (v.avgMetric/1000).toFixed(0) + 'K';
                 
                 // 檢查是否有 CB
                 const cbInfo = getCbInfo(v.id);
@@ -699,14 +831,29 @@
             });
             lucide.createIcons();
 
-            const sCounts = {}; validStocks.forEach(v => { const s = v.sector || '其他'; sCounts[s] = (sCounts[s] || 0) + 1; });
-            renderSectorChart(Object.keys(sCounts), Object.values(sCounts));
+            const tagCounts = {};
+            validStocks.forEach(v => {
+                const tags = getTagsForStock(v.id);
+                if (!tags.length) {
+                    tagCounts['未標記'] = (tagCounts['未標記'] || 0) + 1;
+                    return;
+                }
+                tags.forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; });
+            });
+            renderTagRankList(tagCounts);
 
-            const allStocksQuery = db.exec(`SELECT m.stockId, m.name, s.產業組別 FROM market_data m LEFT JOIN sector_map s ON m.stockId = s.stock_id WHERE m.tradeDate <= ${latestDate} GROUP BY m.stockId ORDER BY m.name ASC`);
+            const allStocksQuery = db.exec(`SELECT m.stockId, m.name FROM market_data m WHERE m.tradeDate <= ${latestDate} GROUP BY m.stockId ORDER BY m.name ASC`);
             if (allStocksQuery.length) {
-                const allStocks = allStocksQuery[0].values.filter(v => !(p.excludeETF && isETF(v[0], v[1], v[2])) && !(p.excludeFinance && v[2] && v[2].includes('金融')));
-                if (stockSelectInstance) { stockSelectInstance.clear(); stockSelectInstance.clearOptions(); stockSelectInstance.addOptions(allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` }))); }
-                else { stockSelectInstance = new TomSelect("#stock-selector", { create: false, maxItems: 1, onChange: val => { if(val) updatePriceTrend(val); } }); stockSelectInstance.addOptions(allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` }))); }
+                const allStocks = allStocksQuery[0].values.filter(v => !(p.excludeETF && isETF(v[0], v[1])) && !(p.excludeFinance && isFinanceStock(v[0], v[1])));
+                const onStockSelect = val => { if (val) { updatePriceTrend(val); updateStockAnalysisMeta(val); } };
+                if (stockSelectInstance) {
+                    stockSelectInstance.clear();
+                    stockSelectInstance.clearOptions();
+                    stockSelectInstance.addOptions(allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` })));
+                } else {
+                    stockSelectInstance = new TomSelect("#stock-selector", { create: false, maxItems: 1, onChange: onStockSelect });
+                    stockSelectInstance.addOptions(allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` })));
+                }
             }
         }
 
@@ -718,16 +865,16 @@
                 currentReferenceDate = new Date(currentReferenceTimestamp).toLocaleDateString('zh-TW');
             }
             const tableBody = document.getElementById('surge-table-body'); tableBody.innerHTML = '';
-            const res = db.exec(`SELECT m.stockId, m.name, m.volume, m.tradeDate, s.產業組別 FROM market_data m LEFT JOIN sector_map s ON m.stockId = s.stock_id WHERE m.tradeDate <= ${p.deadline} AND m.tradeDate >= ${p.deadline - 31536000000} ORDER BY m.stockId, m.tradeDate DESC`);
+            const res = db.exec(`SELECT m.stockId, m.name, m.volume, m.tradeDate FROM market_data m WHERE m.tradeDate <= ${p.deadline} AND m.tradeDate >= ${p.deadline - 31536000000} ORDER BY m.stockId, m.tradeDate DESC`);
             if (!res.length) return;
-            const groups = {}; res[0].values.forEach(v => { if (!groups[v[0]]) groups[v[0]] = { name: v[1], volumes: [], sector: v[4] || '其他' }; groups[v[0]].volumes.push(v[2]); });
+            const groups = {}; res[0].values.forEach(v => { if (!groups[v[0]]) groups[v[0]] = { name: v[1], volumes: [] }; groups[v[0]].volumes.push(v[2]); });
             const results = [];
             for (const id in groups) {
-                const s = groups[id]; if ((p.excludeETF && isETF(id, s.name, s.sector)) || (p.excludeFinance && s.sector && s.sector.includes('金融')) || s.volumes.length < p.recentDays + 1 || blacklist.find(b => b.id === id)) continue;
+                const s = groups[id]; if ((p.excludeETF && isETF(id, s.name)) || (p.excludeFinance && isFinanceStock(id, s.name)) || s.volumes.length < p.recentDays + 1 || blacklist.find(b => b.id === id)) continue;
                 const recent = s.volumes.slice(0, p.recentDays).reduce((a,b)=>a+b,0)/p.recentDays;
                 const hist = s.volumes.slice(p.recentDays).reduce((a,b)=>a+b,0)/(s.volumes.length-p.recentDays);
                 if (hist > 0 && recent >= p.minAvgVol) {
-                    const ratio = recent / hist; if (ratio >= p.surgeRatio) results.push({ id, name: s.name, sector: s.sector, hist, recent, ratio });
+                    const ratio = recent / hist; if (ratio >= p.surgeRatio) results.push({ id, name: s.name, tags: getTagsLabel(id), hist, recent, ratio });
                 }
             }
             currentSurgeList = results;
@@ -740,19 +887,15 @@
                     const cbInfo = getCbInfo(item.id);
                     const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${item.id}')">CB</span>` : '';
 
-                    tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium">${item.sector}</td><td class="text-right font-mono text-slate-300">${(item.hist/1000).toFixed(1)}K</td><td class="text-right font-bold text-yellow-400 text-sm">${(item.recent/1000).toFixed(1)}K</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition"><i data-lucide="eye" size="14"></i></button><button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></td>`;
+                    tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium max-w-[10rem] truncate" title="${item.tags}">${item.tags}</td><td class="text-right font-mono text-slate-300">${(item.hist/1000).toFixed(1)}K</td><td class="text-right font-bold text-yellow-400 text-sm">${(item.recent/1000).toFixed(1)}K</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition"><i data-lucide="eye" size="14"></i></button><button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></td>`;
                     tableBody.appendChild(tr);
                 });
                 lucide.createIcons();
             }
         }
 
-        function renderSectorChart(labels, data) {
-            if (sectorChart) sectorChart.destroy();
-            sectorChart = new Chart(document.getElementById('sectorChart'), { type: 'doughnut', data: { labels, datasets: [{ data, backgroundColor: ['#f43f5e', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#6366f1', '#475569'], borderWidth: 0 }] }, options: { responsive: true, maintainAspectRatio: false, cutout: '75%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 8, font: { size: 9 }, padding: 10, color: '#94a3b8' } } } } });
-        }
-
         function updatePriceTrend(stockId) {
+            updateStockAnalysisMeta(stockId);
             const p = getParams(); const res = db.exec(`SELECT tradeDate, close, volume FROM market_data WHERE stockId = '${stockId}' ORDER BY tradeDate ASC`);
             if (!res.length) return; const vals = res[0].values;
             const labels = vals.map(v => {
@@ -1041,7 +1184,7 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
                                 const days = parseInt(el.value) || 1;
                                 document.getElementById('th-dynamic-gain').innerText = days > 1 ? `波段漲幅` : `單日漲幅`;
                                 const mode = document.body.getAttribute('data-mode');
-                                document.getElementById('th-dynamic-metric').innerText = mode === 'value' ? (days > 1 ? `平均成交值` : `成交值`) : (days > 1 ? `平均成交量` : `成交量`);
+                                document.getElementById('th-dynamic-metric').innerText = mode === 'value' ? (days > 1 ? `平均成交金額(百萬)` : `成交金額(百萬)`) : (days > 1 ? `平均成交量` : `成交量`);
                             }
                         }
                     });
