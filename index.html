@@ -573,7 +573,7 @@
                         <span class="price-detail-gain ${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base">
                             ${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%
                         </span>
-                        <span class="price-detail-vol text-slate-400 text-sm">量 ${(quote.volume / 1000).toFixed(1)}K</span>
+                        <span class="price-detail-vol text-slate-400 text-sm">量 ${formatVolumeK(quote.volume)}</span>
                     </div>
                 </div>
                 ${hasSpot ? `<div class="price-detail-divider" aria-hidden="true"></div>
@@ -582,7 +582,7 @@
                     <div class="price-val-spot">${Number(spot.close).toLocaleString()}</div>
                     <div class="price-detail-sub">
                         ${spotGain != null ? `<span class="price-detail-gain ${spotGain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base">${spotGain >= 0 ? '+' : ''}${(spotGain * 100).toFixed(2)}%</span>` : ''}
-                        ${spot.volume != null ? `<span class="price-detail-vol text-slate-400 text-sm">量 ${(spot.volume / 1000).toFixed(1)}K</span>` : ''}
+                        ${spot.volume != null ? `<span class="price-detail-vol text-slate-400 text-sm">量 ${formatVolumeK(spot.volume)}</span>` : ''}
                     </div>
                 </div>` : ''}
                 ${quoteDate ? `<div class="price-detail-time">數據 ${quoteDate}</div>` : ''}
@@ -611,7 +611,7 @@
                     futGain.textContent = `${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%`;
                 }
                 const futVol = futCol.querySelector('.price-detail-vol');
-                if (futVol) futVol.textContent = `量 ${(quote.volume / 1000).toFixed(1)}K`;
+                if (futVol) futVol.textContent = `量 ${formatVolumeK(quote.volume)}`;
             }
             const spotCol = el.querySelector('.price-detail-spot');
             if (spot?.close != null && spotCol) {
@@ -624,7 +624,7 @@
                     spotGainEl.textContent = `${spotGainVal >= 0 ? '+' : ''}${(spotGainVal * 100).toFixed(2)}%`;
                 }
                 const spotVolEl = spotCol.querySelector('.price-detail-vol');
-                if (spotVolEl && spot.volume != null) spotVolEl.textContent = `量 ${(spot.volume / 1000).toFixed(1)}K`;
+                if (spotVolEl && spot.volume != null) spotVolEl.textContent = `量 ${formatVolumeK(spot.volume)}`;
             }
             const dateEl = el.querySelector('.price-detail-time');
             if (dateEl) dateEl.textContent = `數據 ${formatDataDateTime(quote.tradeDate, quote.time)}`;
@@ -636,7 +636,7 @@
                 const mult = (quote.name || '').includes('小型') ? 100 : 2000;
                 return formatTradeValueMillion((quote.volume * quote.close * mult) / 1000000);
             }
-            return (quote.volume / 1000).toFixed(0) + 'K';
+            return formatVolumeK(quote.volume);
         }
 
         function patchStrongTableLive() {
@@ -1073,6 +1073,12 @@
             stopCloudDbPolling();
         }
 
+        function formatVolumeK(vol) {
+            if (vol === null || vol === undefined || isNaN(vol)) return '0.0K';
+            const k = vol / 1000;
+            return (k >= 10 ? k.toFixed(0) : k.toFixed(1)) + 'K';
+        }
+
         function formatTradeValueMillion(val) {
             if (val === null || val === undefined || isNaN(val)) return "0";
             if (val >= 100) return (val / 100).toFixed(2) + ' 億';
@@ -1490,7 +1496,7 @@
                 tr.dataset.stockId = v.id;
                 const rank = i + 1;
                 const rankClass = rank <= 3 ? 'stock-rank rank-top' : 'stock-rank';
-                const displayMetric = p.mode === 'value' ? formatTradeValueMillion(v.avgMetric) : (v.avgMetric/1000).toFixed(0) + 'K';
+                const displayMetric = p.mode === 'value' ? formatTradeValueMillion(v.avgMetric) : formatVolumeK(v.avgMetric);
                 const gainClass = v.gain >= 0 ? 'text-rose-400' : 'text-emerald-400';
                 const gainSign = v.gain >= 0 ? '+' : '';
 
@@ -1563,7 +1569,7 @@
                     const cbInfo = getCbInfo(item.id);
                     const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${item.id}')">CB</span>` : '';
 
-                    tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium max-w-[10rem] truncate" title="${item.tags}">${item.tags}</td><td class="text-right font-mono text-slate-300">${(item.hist/1000).toFixed(1)}K</td><td class="text-right font-bold text-yellow-400 text-sm">${(item.recent/1000).toFixed(1)}K</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition"><i data-lucide="eye" size="14"></i></button><button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></td>`;
+                    tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium max-w-[10rem] truncate" title="${item.tags}">${item.tags}</td><td class="text-right font-mono text-slate-300">${formatVolumeK(item.hist)}</td><td class="text-right font-bold text-yellow-400 text-sm">${formatVolumeK(item.recent)}</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition"><i data-lucide="eye" size="14"></i></button><button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></td>`;
                     tableBody.appendChild(tr);
                 });
                 lucide.createIcons();
