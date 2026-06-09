@@ -422,6 +422,169 @@
         // 成交金額（百萬）：小型 1口=100股，標準 1口=2000股 → 元 / 1e6
         const TRADE_VALUE_M_SQL = `(volume * close * CASE WHEN name LIKE '%小型%' THEN 100 ELSE 2000 END) / 1000000.0`;
 
+        /** 即時報價輪詢間隔（毫秒）；僅更新 WASM 記憶體內 db，不寫入本機 market.db */
+        const LIVE_QUOTE_REFRESH_MS = 10000;
+        const LIVE_QUOTE_LOCAL_PORT = 8765;
+        const WANTGOO_QUOTES_URL = 'https://www.wantgoo.com/investrue/all-quote-info';
+        const WANTGOO_FUTURES_URL = 'https://www.wantgoo.com/futures/all-stock-futures-list';
+        /** 公開網站部署時的備援 CORS 代理（本機請用 serve_dashboard.py，設空字串可關閉） */
+        const LIVE_QUOTE_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+        let liveQuoteTimerId = null, futuresMapCache = null, liveQuoteInFlight = false, lastLiveQuoteAt = 0;
+
+        function getLiveQuoteApiBase() {
+            if (location.protocol === 'file:') return `http://127.0.0.1:${LIVE_QUOTE_LOCAL_PORT}`;
+            if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
+                return `${location.protocol}//${location.host}`;
+            }
+            return null;
+        }
+
+        function liveQuoteEndpoint(url) {
+            const base = getLiveQuoteApiBase();
+            if (!base) return url;
+            if (url.includes('all-quote-info')) return `${base}/api/quotes`;
+            if (url.includes('all-stock-futures-list')) return `${base}/api/futures`;
+            return url;
+        }
+
+        function liveQuoteFetchHint() {
+            if (location.protocol === 'file:') {
+                return '請先執行 serve_dashboard.bat（或 python serve_dashboard.py）再以 http://127.0.0.1:8765 開啟';
+            }
+            return '';
+        }
+        const MARKET_DATA_UPSERT_SQL = `INSERT INTO market_data (
+            stockId, name, tradeDate, time, flat, floor, ceil, open, high, low, close,
+            volume, millionAmount, previousClose, previousVolume, previousMillionAmount
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(stockId, tradeDate) DO UPDATE SET
+            name=excluded.name, time=excluded.time, flat=excluded.flat, floor=excluded.floor,
+            ceil=excluded.ceil, open=excluded.open, high=excluded.high, low=excluded.low,
+            close=excluded.close, volume=excluded.volume, millionAmount=excluded.millionAmount,
+            previousClose=excluded.previousClose, previousVolume=excluded.previousVolume,
+            previousMillionAmount=excluded.previousMillionAmount`;
+
+        async function fetchWantgooJson(url) {
+            const target = liveQuoteEndpoint(url);
+            const viaLocalApi = target !== url;
+            const headers = viaLocalApi ? {} : {
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'Referer': 'https://www.wantgoo.com/'
+            };
+            const fetchJson = async (fetchUrl, withHeaders) => {
+                const init = { cache: 'no-store' };
+                if (withHeaders && Object.keys(headers).length) init.headers = headers;
+                const resp = await fetch(fetchUrl, init);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+                if (data && data.error) throw new Error(data.error);
+                return data;
+            };
+            if (viaLocalApi) {
+                try {
+                    return await fetchJson(target, false);
+                } catch (err) {
+                    const hint = liveQuoteFetchHint();
+                    throw new Error(hint || err.message);
+                }
+            }
+            try {
+                return await fetchJson(url, true);
+            } catch (err) {
+                if (!LIVE_QUOTE_CORS_PROXY) throw err;
+                const proxyUrl = LIVE_QUOTE_CORS_PROXY + encodeURIComponent(url);
+                return await fetchJson(proxyUrl, false);
+            }
+        }
+
+        async function ensureFuturesMap() {
+            if (futuresMapCache) return futuresMapCache;
+            const futures = await fetchWantgooJson(WANTGOO_FUTURES_URL);
+            futuresMapCache = {};
+            futures.forEach(item => {
+                futuresMapCache[item.id] = { stockId: item.stockId, name: item.name };
+            });
+            return futuresMapCache;
+        }
+
+        function upsertQuotesToMemoryDb(quotes, futuresMap) {
+            db.run('BEGIN TRANSACTION');
+            try {
+                let updated = 0;
+                for (const q of quotes) {
+                    const mapping = futuresMap[q.id];
+                    if (!mapping?.stockId) continue;
+                    db.run(MARKET_DATA_UPSERT_SQL, [
+                        mapping.stockId, mapping.name,
+                        q.tradeDate ?? null, q.time ?? null,
+                        q.flat ?? null, q.floor ?? null, q.ceil ?? null,
+                        q.open ?? null, q.high ?? null, q.low ?? null, q.close ?? null,
+                        q.volume ?? null, q.millionAmount ?? null,
+                        q.previousClose ?? null, q.previousVolume ?? null, q.previousMillionAmount ?? null
+                    ]);
+                    updated++;
+                }
+                db.run('COMMIT');
+                return updated;
+            } catch (e) {
+                db.run('ROLLBACK');
+                throw e;
+            }
+        }
+
+        function setLiveQuoteStatus(state, detail) {
+            const el = document.getElementById('db-status');
+            if (!el) return;
+            const timeStr = lastLiveQuoteAt
+                ? new Date(lastLiveQuoteAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                : '';
+            if (state === 'loading') {
+                el.innerHTML = `<i data-lucide="loader-2" class="text-blue-400 animate-spin" size="14"></i> 更新即時報價中…`;
+            } else if (state === 'ok') {
+                el.innerHTML = `<i data-lucide="radio" class="text-emerald-500" size="14"></i> 即時報價 ${timeStr}${detail != null ? ` · ${detail} 檔` : ''}`;
+            } else {
+                el.innerHTML = `<i data-lucide="alert-circle" class="text-amber-500" size="14"></i> 即時報價失敗${detail ? `：${detail}` : ''}`;
+            }
+            lucide.createIcons();
+        }
+
+        async function refreshLiveQuotes() {
+            if (!db || liveQuoteInFlight || document.hidden) return;
+            liveQuoteInFlight = true;
+            try {
+                setLiveQuoteStatus('loading');
+                const [quotes, futuresMap] = await Promise.all([
+                    fetchWantgooJson(WANTGOO_QUOTES_URL),
+                    ensureFuturesMap()
+                ]);
+                const count = upsertQuotesToMemoryDb(quotes, futuresMap);
+                lastLiveQuoteAt = Date.now();
+                setLiveQuoteStatus('ok', count);
+                tryAnalyze();
+                const sid = stockSelectInstance?.getValue();
+                if (sid) updatePriceTrend(sid);
+            } catch (e) {
+                console.error('Live quote refresh failed:', e);
+                setLiveQuoteStatus('err', e.message);
+            } finally {
+                liveQuoteInFlight = false;
+            }
+        }
+
+        function startLiveQuotePolling() {
+            stopLiveQuotePolling();
+            refreshLiveQuotes();
+            liveQuoteTimerId = setInterval(refreshLiveQuotes, LIVE_QUOTE_REFRESH_MS);
+        }
+
+        function stopLiveQuotePolling() {
+            if (liveQuoteTimerId) {
+                clearInterval(liveQuoteTimerId);
+                liveQuoteTimerId = null;
+            }
+        }
+
         function formatTradeValueMillion(val) {
             if (val === null || val === undefined || isNaN(val)) return "0";
             if (val >= 100) return (val / 100).toFixed(2) + ' 億';
@@ -652,6 +815,9 @@
             }
         }
 
+        // 非金融但名稱以「銀期貨」結尾（如 2049 上銀期貨）
+        const NON_FINANCE_FUTURES_CODES = new Set(['2049']);
+
         function normalizeStockCode(id) {
             const s = String(id || '').trim();
             const m = s.match(/^(\d{4})/);
@@ -694,8 +860,22 @@
         }
 
         function isFinanceStock(stockId, name) {
-            const n = (name || '');
-            return /金控|銀行|保險|證券|金融/.test(n);
+            const code = normalizeStockCode(stockId);
+            const raw = (name || '').replace(/^小型/, '').trim();
+            const core = raw.replace(/期貨$/, '').trim();
+
+            // market_data 期貨命名：富邦金期貨、國泰金期貨、彰銀期貨…
+            if (/金期貨$|金控期貨$|保險期貨$|證券期貨$|金融期貨$/.test(raw)) return true;
+            if (/銀期貨$/.test(raw) && !NON_FINANCE_FUTURES_CODES.has(code)) return true;
+            if (/金控|銀行|保險|證券|金融|金租|票券|商銀|企銀/.test(core)) return true;
+
+            if (db) {
+                try {
+                    const res = db.exec(`SELECT 產業組別 FROM sector_map WHERE stock_id = '${code}' LIMIT 1`);
+                    if (res.length && res[0].values[0]?.[0]?.includes('金融')) return true;
+                } catch (_) { /* 新版 DB 可能無 sector_map */ }
+            }
+            return false;
         }
 
         async function loadDatabase(uint8Array) {
@@ -707,7 +887,8 @@
                 document.getElementById('dashboard-content').classList.remove('hidden');
                 document.getElementById('settings-panel').classList.remove('hidden');
                 document.getElementById('db-status').innerHTML = `<i data-lucide="check-circle" class="text-emerald-500" size="14"></i> 雲端數據已同步`;
-                tryAnalyze(); 
+                tryAnalyze();
+                startLiveQuotePolling();
                 showToast("數據同步成功");
                 lucide.createIcons();
             } catch (err) { console.error("WASM Load Error:", err); showToast("資料庫引擎載入失敗"); }
@@ -1192,6 +1373,10 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
             });
 
             lucide.createIcons();
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && db) refreshLiveQuotes();
+            });
+            window.addEventListener('beforeunload', stopLiveQuotePolling);
             await fetchRemoteDatabase();
         };
     </script>
