@@ -399,24 +399,65 @@
             }).join('');
         }
 
+        function formatDataDateTime(tradeDate, time) {
+            const ts = (time != null && time > 0) ? time : tradeDate;
+            if (!ts) return '--';
+            const parts = Object.fromEntries(
+                new Intl.DateTimeFormat('zh-TW', {
+                    timeZone: 'Asia/Taipei',
+                    year: 'numeric', month: 'numeric', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                    hour12: false
+                }).formatToParts(new Date(ts)).filter(p => p.type !== 'literal').map(p => [p.type, p.value])
+            );
+            return `${parts.year}/${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+        }
+
+        function getLatestDataDateTime(tradeDate) {
+            if (!db || !tradeDate) return '--';
+            try {
+                const res = db.exec(`SELECT MAX(time) FROM market_data WHERE tradeDate = ${tradeDate}`);
+                const latestTime = res.length ? res[0].values[0]?.[0] : null;
+                return formatDataDateTime(tradeDate, latestTime);
+            } catch (e) {
+                return formatDataDateTime(tradeDate, null);
+            }
+        }
+
+        function getStockLatestQuote(stockId) {
+            if (!db || !stockId) return null;
+            const p = getParams();
+            try {
+                const res = db.exec(`SELECT close, previousClose, volume, tradeDate, time, name FROM market_data WHERE stockId = '${stockId}' AND tradeDate <= ${p.deadline} ORDER BY tradeDate DESC LIMIT 1`);
+                if (!res.length || !res[0].values.length) return null;
+                const [close, previousClose, volume, tradeDate, time, name] = res[0].values[0];
+                const gain = previousClose > 0 ? (close - previousClose) / previousClose : 0;
+                return { close, previousClose, volume, tradeDate, time, name, gain };
+            } catch (e) { return null; }
+        }
+
         function updateStockAnalysisMeta(stockId) {
             const el = document.getElementById('stock-analysis-meta');
             if (!el || !stockId) return;
-            let name = '';
-            if (db) {
-                try {
-                    const res = db.exec(`SELECT name FROM market_data WHERE stockId = '${stockId}' LIMIT 1`);
-                    if (res.length && res[0].values.length) name = res[0].values[0][0];
-                } catch (e) { /* ignore */ }
-            }
+            const quote = getStockLatestQuote(stockId);
+            const name = quote?.name || '';
             const tags = getTagsForStock(stockId);
             const tagHtml = tags.length
                 ? tags.map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('')
                 : '<span class="text-slate-500 text-xs">尚無題材標籤</span>';
-            el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-2">
+            const quoteDate = quote ? formatDataDateTime(quote.tradeDate, quote.time) : '';
+            const priceHtml = quote ? `<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-2">
+                <span class="text-2xl md:text-3xl font-bold font-mono text-slate-100">${Number(quote.close).toLocaleString()}</span>
+                <span class="${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-sm md:text-base">
+                    ${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%
+                </span>
+                <span class="text-slate-500 text-xs">量 ${(quote.volume / 1000).toFixed(1)}K</span>
+                ${quoteDate ? `<span class="text-slate-500 text-xs">數據 ${quoteDate}</span>` : ''}
+            </div>` : '';
+            el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="font-bold text-slate-100 text-base">${escapeHtml(stockId)}</span>
                 ${name ? `<span class="text-slate-400">${escapeHtml(name)}</span>` : ''}
-            </div><div class="flex flex-wrap gap-1.5">${tagHtml}</div>`;
+            </div>${priceHtml}<div class="flex flex-wrap gap-1.5 mt-2">${tagHtml}</div>`;
         }
 
         // 成交金額（百萬）：小型 1口=100股，標準 1口=2000股 → 元 / 1e6
@@ -1111,7 +1152,7 @@
             if (!latestDateRes.length || !latestDateRes[0].values[0][0]) return;
             const latestDate = latestDateRes[0].values[0][0];
             currentReferenceTimestamp = latestDate;
-            currentReferenceDate = new Date(latestDate).toLocaleDateString('zh-TW');
+            currentReferenceDate = getLatestDataDateTime(latestDate);
 
             const dateListRes = db.exec(`SELECT DISTINCT tradeDate FROM market_data WHERE tradeDate <= ${p.deadline} ORDER BY tradeDate DESC LIMIT ${p.avgDays}`);
             const targetDates = dateListRes[0].values.map(v => v[0]);
@@ -1216,7 +1257,7 @@
             const latestDateRes = db.exec(`SELECT MAX(tradeDate) FROM market_data WHERE tradeDate <= ${p.deadline}`);
             if (latestDateRes.length && latestDateRes[0].values[0][0]) {
                 currentReferenceTimestamp = latestDateRes[0].values[0][0];
-                currentReferenceDate = new Date(currentReferenceTimestamp).toLocaleDateString('zh-TW');
+                currentReferenceDate = getLatestDataDateTime(currentReferenceTimestamp);
             }
             const tableBody = document.getElementById('surge-table-body'); tableBody.innerHTML = '';
             const res = db.exec(`SELECT m.stockId, m.name, m.volume, m.tradeDate FROM market_data m WHERE m.tradeDate <= ${p.deadline} AND m.tradeDate >= ${p.deadline - 31536000000} ORDER BY m.stockId, m.tradeDate DESC`);
