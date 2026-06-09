@@ -427,12 +427,25 @@
         const LIVE_QUOTE_LOCAL_PORT = 8765;
         const WANTGOO_QUOTES_URL = 'https://www.wantgoo.com/investrue/all-quote-info';
         const WANTGOO_FUTURES_URL = 'https://www.wantgoo.com/futures/all-stock-futures-list';
-        /** 公開網站部署時的備援 CORS 代理（本機請用 serve_dashboard.py，設空字串可關閉） */
-        const LIVE_QUOTE_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+        /**
+         * GitHub Pages 即時報價：部署 quote_proxy_worker.js 到 Cloudflare Worker 後填入網址。
+         * 例：'https://stock-quote-proxy.你的帳號.workers.dev'（結尾不要 /）
+         * 留空則 GitHub Pages 改為定期重拉下方 GITHUB_DB_URL 的 ZIP。
+         */
+        const LIVE_QUOTE_API_BASE = 'https://stock-crawer.pages.dev';
+        const GITHUB_DB_URL = 'https://raw.githubusercontent.com/samuel100u/stock-futures_db/main/market.db.zip';
+        /** GitHub Pages 且未設 Worker 時，重拉雲端 DB 間隔（毫秒）；0 = 關閉 */
+        const GITHUB_DB_REFRESH_MS = 120000;
 
-        let liveQuoteTimerId = null, futuresMapCache = null, liveQuoteInFlight = false, lastLiveQuoteAt = 0;
+        let liveQuoteTimerId = null, cloudDbTimerId = null, futuresMapCache = null;
+        let liveQuoteInFlight = false, cloudDbInFlight = false, lastLiveQuoteAt = 0, lastCloudDbAt = 0;
+
+        function isGitHubPages() {
+            return /\.github\.io$/i.test(location.hostname);
+        }
 
         function getLiveQuoteApiBase() {
+            if (LIVE_QUOTE_API_BASE) return LIVE_QUOTE_API_BASE.replace(/\/$/, '');
             if (location.protocol === 'file:') return `http://127.0.0.1:${LIVE_QUOTE_LOCAL_PORT}`;
             if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
                 return `${location.protocol}//${location.host}`;
@@ -448,11 +461,18 @@
             return url;
         }
 
-        function liveQuoteFetchHint() {
-            if (location.protocol === 'file:') {
-                return '請先執行 serve_dashboard.bat（或 python serve_dashboard.py）再以 http://127.0.0.1:8765 開啟';
+        function formatLiveQuoteError(err, fetchUrl) {
+            const msg = err?.message || String(err);
+            if (msg.includes('HTTP 404')) {
+                return `代理 API 404，請重新部署 Cloudflare Pages（需含 functions/ 資料夾）。測試：${fetchUrl}`;
             }
-            return '';
+            if (!LIVE_QUOTE_API_BASE && location.protocol === 'file:') {
+                return '請先執行 serve_dashboard.bat，或以 http://127.0.0.1:8765 開啟';
+            }
+            if (isGitHubPages() && !LIVE_QUOTE_API_BASE) {
+                return '請設定 LIVE_QUOTE_API_BASE 指向 Cloudflare Pages 代理網址';
+            }
+            return msg;
         }
         const MARKET_DATA_UPSERT_SQL = `INSERT INTO market_data (
             stockId, name, tradeDate, time, flat, floor, ceil, open, high, low, close,
@@ -485,17 +505,10 @@
                 try {
                     return await fetchJson(target, false);
                 } catch (err) {
-                    const hint = liveQuoteFetchHint();
-                    throw new Error(hint || err.message);
+                    throw new Error(formatLiveQuoteError(err, target));
                 }
             }
-            try {
-                return await fetchJson(url, true);
-            } catch (err) {
-                if (!LIVE_QUOTE_CORS_PROXY) throw err;
-                const proxyUrl = LIVE_QUOTE_CORS_PROXY + encodeURIComponent(url);
-                return await fetchJson(proxyUrl, false);
-            }
+            return await fetchJson(url, true);
         }
 
         async function ensureFuturesMap() {
@@ -583,6 +596,93 @@
                 clearInterval(liveQuoteTimerId);
                 liveQuoteTimerId = null;
             }
+        }
+
+        function setCloudDbStatus(state, detail) {
+            const el = document.getElementById('db-status');
+            if (!el) return;
+            const timeStr = lastCloudDbAt
+                ? new Date(lastCloudDbAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+                : '';
+            if (state === 'loading') {
+                el.innerHTML = `<i data-lucide="loader-2" class="text-blue-400 animate-spin" size="14"></i> 同步雲端 DB…`;
+            } else if (state === 'ok') {
+                el.innerHTML = `<i data-lucide="cloud" class="text-emerald-500" size="14"></i> 雲端 DB ${timeStr}${detail ? ` · ${detail}` : ''}`;
+            } else {
+                el.innerHTML = `<i data-lucide="alert-circle" class="text-amber-500" size="14"></i> 雲端 DB 同步失敗${detail ? `：${detail}` : ''}`;
+            }
+            lucide.createIcons();
+        }
+
+        async function fetchMarketDbUint8() {
+            const response = await fetch(`${GITHUB_DB_URL}?v=${Date.now()}`, { cache: 'no-store' });
+            if (!response.ok) throw new Error('網路請求失敗');
+            const buffer = await response.arrayBuffer();
+            const zip = await JSZip.loadAsync(buffer);
+            const entry = findMarketDbEntry(zip);
+            if (!entry) throw new Error('ZIP 內找不到 market.db');
+            return entry.async('uint8array');
+        }
+
+        async function applyDatabaseBytes(uint8, { isFirstLoad = false } = {}) {
+            const SQL = await sqlPromise;
+            if (db) db.close();
+            db = new SQL.Database(uint8);
+            loadStockTagsMap();
+            if (isFirstLoad) {
+                document.getElementById('welcome-screen').classList.add('hidden');
+                document.getElementById('dashboard-content').classList.remove('hidden');
+                document.getElementById('settings-panel').classList.remove('hidden');
+            }
+            tryAnalyze();
+            const sid = stockSelectInstance?.getValue();
+            if (sid) updatePriceTrend(sid);
+        }
+
+        async function refreshCloudDatabase({ silent = false } = {}) {
+            if (!db || cloudDbInFlight || document.hidden) return;
+            cloudDbInFlight = true;
+            try {
+                if (!silent) setCloudDbStatus('loading');
+                const uint8 = await fetchMarketDbUint8();
+                await applyDatabaseBytes(uint8);
+                lastCloudDbAt = Date.now();
+                setCloudDbStatus('ok', '已更新');
+            } catch (e) {
+                console.error('Cloud DB refresh failed:', e);
+                if (!silent) setCloudDbStatus('err', e.message);
+            } finally {
+                cloudDbInFlight = false;
+            }
+        }
+
+        function startCloudDbPolling() {
+            stopCloudDbPolling();
+            cloudDbTimerId = setInterval(() => refreshCloudDatabase({ silent: true }), GITHUB_DB_REFRESH_MS);
+        }
+
+        function stopCloudDbPolling() {
+            if (cloudDbTimerId) {
+                clearInterval(cloudDbTimerId);
+                cloudDbTimerId = null;
+            }
+        }
+
+        /** 本機 → serve_dashboard 即時報價；GitHub Pages + Worker → 即時報價；否則 → 定期重拉雲端 DB */
+        function startDataRefresh() {
+            stopDataRefresh();
+            if (getLiveQuoteApiBase()) {
+                startLiveQuotePolling();
+            } else if (isGitHubPages() && GITHUB_DB_REFRESH_MS > 0) {
+                lastCloudDbAt = Date.now();
+                setCloudDbStatus('ok', `每 ${Math.round(GITHUB_DB_REFRESH_MS / 1000)} 秒同步`);
+                startCloudDbPolling();
+            }
+        }
+
+        function stopDataRefresh() {
+            stopLiveQuotePolling();
+            stopCloudDbPolling();
         }
 
         function formatTradeValueMillion(val) {
@@ -880,15 +980,11 @@
 
         async function loadDatabase(uint8Array) {
             try {
-                const SQL = await sqlPromise;
-                db = new SQL.Database(uint8Array);
-                loadStockTagsMap();
-                document.getElementById('welcome-screen').classList.add('hidden');
-                document.getElementById('dashboard-content').classList.remove('hidden');
-                document.getElementById('settings-panel').classList.remove('hidden');
-                document.getElementById('db-status').innerHTML = `<i data-lucide="check-circle" class="text-emerald-500" size="14"></i> 雲端數據已同步`;
-                tryAnalyze();
-                startLiveQuotePolling();
+                await applyDatabaseBytes(uint8Array, { isFirstLoad: true });
+                if (getLiveQuoteApiBase()) {
+                    document.getElementById('db-status').innerHTML = `<i data-lucide="check-circle" class="text-emerald-500" size="14"></i> 雲端數據已同步`;
+                }
+                startDataRefresh();
                 showToast("數據同步成功");
                 lucide.createIcons();
             } catch (err) { console.error("WASM Load Error:", err); showToast("資料庫引擎載入失敗"); }
@@ -903,15 +999,8 @@
 
         /** 下載 ZIP 後全程在記憶體解壓（ArrayBuffer → Uint8Array），不建立本機檔案、不觸發下載。 */
         async function fetchRemoteDatabase() {
-            const dbUrl = `https://raw.githubusercontent.com/samuel100u/stock-futures_db/main/market.db.zip?v=${Date.now()}`;
             try {
-                const response = await fetch(dbUrl, { cache: "no-store" });
-                if (!response.ok) throw new Error("網路請求失敗");
-                const buffer = await response.arrayBuffer();
-                const zip = await JSZip.loadAsync(buffer);
-                const entry = findMarketDbEntry(zip);
-                if (!entry) throw new Error("ZIP 內找不到 market.db");
-                const uint8 = await entry.async("uint8array");
+                const uint8 = await fetchMarketDbUint8();
                 await loadDatabase(uint8);
             } catch (err) {
                 console.error("Fetch DB Error:", err);
@@ -1374,9 +1463,11 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
 
             lucide.createIcons();
             document.addEventListener('visibilitychange', () => {
-                if (!document.hidden && db) refreshLiveQuotes();
+                if (document.hidden || !db) return;
+                if (getLiveQuoteApiBase()) refreshLiveQuotes();
+                else if (isGitHubPages() && GITHUB_DB_REFRESH_MS > 0) refreshCloudDatabase({ silent: true });
             });
-            window.addEventListener('beforeunload', stopLiveQuotePolling);
+            window.addEventListener('beforeunload', stopDataRefresh);
             await fetchRemoteDatabase();
         };
     </script>
