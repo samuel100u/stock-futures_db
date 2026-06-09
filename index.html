@@ -15,7 +15,7 @@
     <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap');
         
         :root {
             --bg-main: #020617;
@@ -30,7 +30,8 @@
         }
 
         body { 
-            font-family: 'Inter', 'Microsoft JhengHei', sans-serif; 
+            font-family: 'Noto Sans TC', 'Inter', 'Microsoft JhengHei', sans-serif; 
+            font-size: 15px;
             background-color: var(--bg-main); 
             color: var(--text-main);
             -webkit-tap-highlight-color: transparent;
@@ -100,9 +101,11 @@
         #mode-toggle-wrapper { display: none; }
         [data-active-tab="overview"] #mode-toggle-wrapper { display: flex; }
         
-        table { border-collapse: separate; border-spacing: 0; }
-        th { background-color: #1e293b !important; color: #94a3b8 !important; padding: 12px 16px !important; }
-        td { border-bottom: 1px solid #1e293b; color: #e2e8f0; padding: 12px 16px !important; }
+        table { border-collapse: separate; border-spacing: 0; font-size: 0.9375rem; }
+        th { background-color: #1e293b !important; color: #cbd5e1 !important; padding: 14px 16px !important; font-size: 0.875rem !important; font-weight: 700 !important; letter-spacing: 0.02em; }
+        td { border-bottom: 1px solid #1e293b; color: #e2e8f0; padding: 14px 16px !important; vertical-align: middle; }
+        .stock-table .stock-code { font-size: 1rem; font-weight: 700; color: #f8fafc; letter-spacing: 0.03em; }
+        .stock-table .stock-name { font-size: 0.8125rem; color: #94a3b8; margin-top: 2px; line-height: 1.4; }
         input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
         
         .badge-red { background: rgba(244, 63, 94, 0.1); color: var(--accent-red); border: 1px solid rgba(244, 63, 94, 0.2); padding: 2px 8px; border-radius: 6px; font-weight: bold; }
@@ -121,6 +124,24 @@
         .tag-rank-row { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-bottom: 1px solid #1e293b; }
         .tag-rank-bar { width: 64px; height: 6px; background: #1e293b; border-radius: 99px; overflow: hidden; flex-shrink: 0; }
         .tag-rank-bar-fill { height: 100%; background: #10b981; border-radius: 99px; }
+        .price-pair-cell { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; min-width: 7.5rem; }
+        .price-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; width: 100%; }
+        .price-tag-futures, .price-tag-spot {
+            display: inline-block; min-width: 2.5rem; text-align: center;
+            font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 5px; flex-shrink: 0;
+        }
+        .price-tag-futures { background: rgba(148, 163, 184, 0.18); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.25); }
+        .price-tag-spot { background: rgba(56, 189, 248, 0.18); color: #bae6fd; border: 1px solid rgba(56, 189, 248, 0.35); }
+        .price-val-futures { font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #f8fafc; letter-spacing: 0.02em; }
+        .price-val-spot { font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; color: #7dd3fc; letter-spacing: 0.02em; }
+        .price-detail-block { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem 1.5rem; margin-top: 0.5rem; }
+        .price-detail-item { min-width: 8rem; }
+        .price-detail-item .price-tag-futures, .price-detail-item .price-tag-spot { font-size: 0.8125rem; padding: 4px 10px; margin-bottom: 6px; }
+        .price-detail-item .price-val-futures, .price-detail-item .price-val-spot { font-size: 1.75rem; line-height: 1.2; }
+        @media (min-width: 768px) {
+            .price-val-futures, .price-val-spot { font-size: 1.125rem; }
+            .price-detail-item .price-val-futures, .price-detail-item .price-val-spot { font-size: 2rem; }
+        }
     </style>
 </head>
 <body class="p-3 md:p-8" data-active-tab="overview" data-mode="volume">
@@ -236,11 +257,11 @@
                             </button>
                         </div>
                         <div class="scrollable-table border border-slate-800 rounded-xl">
-                            <table class="w-full text-left text-xs md:text-sm">
+                            <table class="stock-table w-full text-left text-sm md:text-base">
                                 <thead class="sticky top-0 z-10">
                                     <tr>
                                         <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
-                                        <th class="px-3 md:px-4 py-3 font-bold text-right">當前收盤</th>
+                                        <th class="px-3 md:px-4 py-3 font-bold text-right">期貨 / 現貨</th>
                                         <th id="th-dynamic-gain" class="px-3 md:px-4 py-3 font-bold text-right">漲跌幅</th>
                                         <th id="th-dynamic-metric" class="px-3 md:px-4 py-3 font-bold text-right">成交量</th>
                                         <th class="px-3 md:px-4 py-3 font-bold text-center">看圖</th>
@@ -424,6 +445,34 @@
             }
         }
 
+        /** 現貨報價僅記憶體快取，不寫入 DB */
+        let spotQuoteCache = {};
+
+        function updateSpotQuoteCacheFromQuotes(quotes) {
+            for (const q of quotes) {
+                const sid = q.stockId || q.id;
+                if (!sid || q.spotClose == null) continue;
+                spotQuoteCache[sid] = {
+                    close: q.spotClose,
+                    volume: q.spotVolume ?? null,
+                    previousClose: q.spotPreviousClose ?? null,
+                    time: q.spotTime ?? null,
+                };
+            }
+        }
+
+        function getSpotQuote(stockId) {
+            return spotQuoteCache[stockId] || null;
+        }
+
+        function formatFuturesSpotPriceCell(stockId, futuresClose) {
+            const spot = getSpotQuote(stockId);
+            const fut = `<div class="price-row"><span class="price-tag-futures">期貨</span><span class="price-val-futures">${Number(futuresClose).toLocaleString()}</span></div>`;
+            if (spot?.close == null) return `<div class="price-pair-cell">${fut}</div>`;
+            const sp = `<div class="price-row"><span class="price-tag-spot">現貨</span><span class="price-val-spot">${Number(spot.close).toLocaleString()}</span></div>`;
+            return `<div class="price-pair-cell">${fut}${sp}</div>`;
+        }
+
         function getStockLatestQuote(stockId) {
             if (!db || !stockId) return null;
             const p = getParams();
@@ -446,13 +495,28 @@
                 ? tags.map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join('')
                 : '<span class="text-slate-500 text-xs">尚無題材標籤</span>';
             const quoteDate = quote ? formatDataDateTime(quote.tradeDate, quote.time) : '';
-            const priceHtml = quote ? `<div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-2">
-                <span class="text-2xl md:text-3xl font-bold font-mono text-slate-100">${Number(quote.close).toLocaleString()}</span>
-                <span class="${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-sm md:text-base">
-                    ${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%
-                </span>
-                <span class="text-slate-500 text-xs">量 ${(quote.volume / 1000).toFixed(1)}K</span>
-                ${quoteDate ? `<span class="text-slate-500 text-xs">數據 ${quoteDate}</span>` : ''}
+            const spot = getSpotQuote(stockId);
+            const spotGain = spot?.previousClose > 0 ? (spot.close - spot.previousClose) / spot.previousClose : null;
+            const priceHtml = quote ? `<div class="price-detail-block">
+                <div class="price-detail-item">
+                    <div class="price-tag-futures">期貨</div>
+                    <div class="price-val-futures">${Number(quote.close).toLocaleString()}</div>
+                    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 mt-1">
+                        <span class="${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base">
+                            ${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%
+                        </span>
+                        <span class="text-slate-400 text-sm">量 ${(quote.volume / 1000).toFixed(1)}K</span>
+                    </div>
+                </div>
+                ${spot?.close != null ? `<div class="price-detail-item border-l border-slate-700 pl-4 md:pl-6">
+                    <div class="price-tag-spot">現貨</div>
+                    <div class="price-val-spot">${Number(spot.close).toLocaleString()}</div>
+                    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 mt-1">
+                        ${spotGain != null ? `<span class="${spotGain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base">${spotGain >= 0 ? '+' : ''}${(spotGain * 100).toFixed(2)}%</span>` : ''}
+                        ${spot.volume != null ? `<span class="text-slate-400 text-sm">量 ${(spot.volume / 1000).toFixed(1)}K</span>` : ''}
+                    </div>
+                </div>` : ''}
+                ${quoteDate ? `<span class="text-slate-400 text-sm self-end pb-1">數據 ${quoteDate}</span>` : ''}
             </div>` : '';
             el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="font-bold text-slate-100 text-base">${escapeHtml(stockId)}</span>
@@ -501,7 +565,7 @@
         function liveQuoteEndpoint(url) {
             const base = getLiveQuoteApiBase();
             if (!base) return url;
-            if (url.includes('all-quote-info')) return `${base}/api/quotes`;
+            if (url.includes('all-quote-info')) return `${base}/api/quotes-futures`;
             if (url.includes('all-stock-futures-list')) return `${base}/api/futures`;
             return url;
         }
@@ -571,10 +635,11 @@
             try {
                 let updated = 0;
                 for (const q of quotes) {
-                    const mapping = futuresMap[q.id];
-                    if (!mapping?.stockId) continue;
+                    const stockId = q.stockId || futuresMap?.[q.id]?.stockId;
+                    const name = q.name || futuresMap?.[q.id]?.name;
+                    if (!stockId) continue;
                     db.run(MARKET_DATA_UPSERT_SQL, [
-                        mapping.stockId, mapping.name,
+                        stockId, name,
                         q.tradeDate ?? null, q.time ?? null,
                         q.flat ?? null, q.floor ?? null, q.ceil ?? null,
                         q.open ?? null, q.high ?? null, q.low ?? null, q.close ?? null,
@@ -662,16 +727,18 @@
             liveQuoteInFlight = true;
             try {
                 setLiveQuoteStatus('loading');
-                const [quotes, futuresMap] = await Promise.all([
-                    fetchWantgooJson(WANTGOO_QUOTES_URL),
-                    ensureFuturesMap()
-                ]);
-                const count = upsertQuotesToMemoryDb(quotes, futuresMap);
+                const quotes = await fetchWantgooJson(WANTGOO_QUOTES_URL);
+                updateSpotQuoteCacheFromQuotes(quotes);
+                const count = upsertQuotesToMemoryDb(quotes);
                 lastLiveQuoteAt = Date.now();
                 setLiveQuoteStatus('ok', count);
+                const activeSid = stockSelectInstance?.getValue() || '';
                 tryAnalyze();
-                const sid = stockSelectInstance?.getValue();
-                if (sid) updatePriceTrend(sid);
+                const sid = stockSelectInstance?.getValue() || activeSid;
+                if (sid) {
+                    updateStockAnalysisMeta(sid);
+                    updatePriceTrend(sid);
+                }
             } catch (e) {
                 console.error('Live quote refresh failed:', e);
                 setLiveQuoteStatus('err', e.message);
@@ -1221,7 +1288,7 @@
                 const cbInfo = getCbInfo(v.id);
                 const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${v.id}')">CB</span>` : '';
 
-                tr.innerHTML = `<td class="px-3 md:px-4 py-3"><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${v.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${v.name}</div></td><td class="px-3 md:px-4 py-3 text-right font-mono font-bold text-slate-200">${v.close.toLocaleString()}</td><td class="px-3 md:px-4 py-3 text-right text-rose-400 font-bold text-sm md:text-base">+${(v.gain*100).toFixed(2)}%</td><td class="px-3 md:px-4 py-3 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-mono font-bold text-sm">${displayMetric}</td><td class="px-3 md:px-4 py-3 text-center flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="14"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></td>`;
+                tr.innerHTML = `<td class="px-3 md:px-4 py-3.5"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></td><td class="px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="px-3 md:px-4 py-3.5 text-right text-rose-400 font-bold text-base">+${(v.gain*100).toFixed(2)}%</td><td class="px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
                 tableBody.appendChild(tr);
             });
             lucide.createIcons();
@@ -1240,14 +1307,18 @@
             const allStocksQuery = db.exec(`SELECT m.stockId, m.name FROM market_data m WHERE m.tradeDate <= ${latestDate} GROUP BY m.stockId ORDER BY m.name ASC`);
             if (allStocksQuery.length) {
                 const allStocks = allStocksQuery[0].values.filter(v => !(p.excludeETF && isETF(v[0], v[1])) && !(p.excludeFinance && isFinanceStock(v[0], v[1])));
+                const prevSelected = stockSelectInstance?.getValue() || '';
                 const onStockSelect = val => { if (val) { updatePriceTrend(val); updateStockAnalysisMeta(val); } };
+                const options = allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` }));
                 if (stockSelectInstance) {
-                    stockSelectInstance.clear();
                     stockSelectInstance.clearOptions();
-                    stockSelectInstance.addOptions(allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` })));
+                    stockSelectInstance.addOptions(options);
                 } else {
                     stockSelectInstance = new TomSelect("#stock-selector", { create: false, maxItems: 1, onChange: onStockSelect });
-                    stockSelectInstance.addOptions(allStocks.map(s => ({ value: s[0], text: `${s[0]} ${s[1]}` })));
+                    stockSelectInstance.addOptions(options);
+                }
+                if (prevSelected && allStocks.some(s => s[0] === prevSelected)) {
+                    stockSelectInstance.setValue(prevSelected, true);
                 }
             }
         }
