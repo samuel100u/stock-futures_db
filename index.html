@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- 使用 cdnjs 提供穩定的 SQL.js 資源 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <!-- Lucide 圖標 -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- 引入 Tom Select -->
@@ -115,6 +115,7 @@
             color: #64748b;
         }
         .stock-table .stock-rank.rank-top { color: #34d399; font-size: 1rem; }
+        .mini-day-candle { display: block; flex-shrink: 0; }
         .stock-table .stock-name { font-size: 0.8125rem; color: #94a3b8; margin-top: 2px; line-height: 1.4; }
         input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); cursor: pointer; }
         
@@ -181,6 +182,8 @@
         }
         .price-detail-block.price-detail-single { grid-template-columns: 1fr; max-width: 12rem; }
         .price-detail-col { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; min-width: 0; }
+        .price-detail-head { display: flex; align-items: center; gap: 0.5rem; }
+        .price-detail-candle { display: inline-flex; align-items: center; line-height: 0; flex-shrink: 0; }
         .price-detail-futures { grid-column: 1; }
         .price-detail-spot { grid-column: 3; }
         .price-detail-divider { grid-column: 2; width: 1px; background: #334155; align-self: stretch; }
@@ -329,6 +332,7 @@
                                         <th class="px-2 md:px-3 py-3 font-bold text-center w-10">#</th>
                                         <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
                                         <th class="px-3 md:px-4 py-3 font-bold text-right">期貨 / 現貨</th>
+                                        <th class="px-3 md:px-4 py-3 font-bold text-right">現貨震幅</th>
                                         <th id="th-dynamic-gain" class="px-3 md:px-4 py-3 font-bold text-right">漲跌幅</th>
                                         <th id="th-dynamic-metric" class="px-3 md:px-4 py-3 font-bold text-right">成交量</th>
                                         <th class="px-3 md:px-4 py-3 font-bold text-center">看圖</th>
@@ -434,6 +438,9 @@
          * 💎 定義與組件初始化
          */
         let db = null, priceChart = null, stockSelectInstance = null;
+        const CANDLE_UP = '#f43f5e';
+        const CANDLE_DOWN = '#22c55e';
+        const CANDLE_NEUTRAL = '#64748b';
         let stockTagsMap = {};
         let currentStrongList = [], currentSurgeList = [], currentReferenceDate = "", currentReferenceTimestamp = 0;
         let currentAnalysisPeriodStart = 0, currentAvgDays = 1;
@@ -520,6 +527,9 @@
                 const sid = q.stockId || q.id;
                 if (!sid || q.spotClose == null) continue;
                 spotQuoteCache[sid] = {
+                    open: q.spotOpen ?? null,
+                    high: q.spotHigh ?? null,
+                    low: q.spotLow ?? null,
                     close: q.spotClose,
                     volume: q.spotVolume ?? null,
                     previousClose: q.spotPreviousClose ?? null,
@@ -530,6 +540,50 @@
 
         function getSpotQuote(stockId) {
             return spotQuoteCache[stockId] || null;
+        }
+
+        function formatMiniDayCandle(open, high, low, close, size = 'sm') {
+            const o = Number(open), h = Number(high), l = Number(low), c = Number(close);
+            if (![o, h, l, c].every(v => Number.isFinite(v))) return '';
+            const color = c > o ? CANDLE_UP : c < o ? CANDLE_DOWN : CANDLE_NEUTRAL;
+            const range = Math.max(h - l, 0.001);
+            const [W, H, half] = size === 'md' ? [22, 38, 4.5] : [18, 30, 3.5];
+            const pad = 2, cx = W / 2;
+            const y = v => pad + (H - pad * 2) * (1 - (v - l) / range);
+            const bodyTop = y(Math.max(o, c));
+            const bodyBot = y(Math.min(o, c));
+            const bodyH = Math.max(bodyBot - bodyTop, 2);
+            const tip = `開${o} 高${h} 低${l} 收${c}`;
+            return `<svg class="mini-day-candle" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="${tip}" title="${tip}" role="img">
+                <line x1="${cx}" y1="${y(h)}" x2="${cx}" y2="${y(l)}" stroke="${color}" stroke-width="1.5"/>
+                <rect x="${cx - half}" y="${bodyTop}" width="${half * 2}" height="${bodyH}" fill="${color}" rx="0.5"/>
+            </svg>`;
+        }
+
+        function formatLabeledMiniCandle(open, high, low, close, label, size = 'sm') {
+            const svg = formatMiniDayCandle(open, high, low, close, size);
+            if (!svg) return '';
+            return svg.replace('title="', `title="${label} `).replace('aria-label="', `aria-label="${label} `);
+        }
+
+        function formatFuturesMiniCandle(stockId, size = 'sm') {
+            const q = getStockLatestQuote(stockId);
+            if (!q) return '';
+            return formatLabeledMiniCandle(q.open, q.high, q.low, q.close, '期貨', size);
+        }
+
+        function formatSpotMiniCandle(stockId, size = 'sm') {
+            const spot = getSpotQuote(stockId);
+            if (!spot) return '';
+            return formatLabeledMiniCandle(spot.open, spot.high, spot.low, spot.close, '現貨', size);
+        }
+
+        /** 現貨震幅：(最高價 / 最低價 - 1) × 100% */
+        function formatSpotAmplitude(stockId) {
+            const spot = getSpotQuote(stockId);
+            const high = Number(spot?.high), low = Number(spot?.low);
+            if (!Number.isFinite(high) || !Number.isFinite(low) || low <= 0) return '--';
+            return `${(((high / low) - 1) * 100).toFixed(1)}%`;
         }
 
         function formatFuturesSpotPriceCell(stockId, futuresClose) {
@@ -544,11 +598,11 @@
             if (!db || !stockId) return null;
             const p = getParams();
             try {
-                const res = db.exec(`SELECT close, previousClose, volume, tradeDate, time, name FROM market_data WHERE stockId = '${stockId}' AND tradeDate <= ${p.deadline} ORDER BY tradeDate DESC LIMIT 1`);
+                const res = db.exec(`SELECT open, high, low, close, previousClose, volume, tradeDate, time, name FROM market_data WHERE stockId = '${stockId}' AND tradeDate <= ${p.deadline} ORDER BY tradeDate DESC LIMIT 1`);
                 if (!res.length || !res[0].values.length) return null;
-                const [close, previousClose, volume, tradeDate, time, name] = res[0].values[0];
+                const [open, high, low, close, previousClose, volume, tradeDate, time, name] = res[0].values[0];
                 const gain = previousClose > 0 ? (close - previousClose) / previousClose : 0;
-                return { close, previousClose, volume, tradeDate, time, name, gain };
+                return { open, high, low, close, previousClose, volume, tradeDate, time, name, gain };
             } catch (e) { return null; }
         }
 
@@ -565,9 +619,14 @@
             const spot = getSpotQuote(stockId);
             const spotGain = spot?.previousClose > 0 ? (spot.close - spot.previousClose) / spot.previousClose : null;
             const hasSpot = spot?.close != null;
+            const futCandle = formatFuturesMiniCandle(stockId, 'md');
+            const spotCandle = formatSpotMiniCandle(stockId, 'md');
             const priceHtml = quote ? `<div class="price-detail-block${hasSpot ? '' : ' price-detail-single'}">
                 <div class="price-detail-col price-detail-futures">
-                    <span class="price-tag-futures">期貨</span>
+                    <div class="price-detail-head">
+                        <span class="price-tag-futures">期貨</span>
+                        <span class="price-detail-candle price-detail-candle-futures">${futCandle}</span>
+                    </div>
                     <div class="price-val-futures">${Number(quote.close).toLocaleString()}</div>
                     <div class="price-detail-sub">
                         <span class="price-detail-gain ${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base">
@@ -578,7 +637,10 @@
                 </div>
                 ${hasSpot ? `<div class="price-detail-divider" aria-hidden="true"></div>
                 <div class="price-detail-col price-detail-spot">
-                    <span class="price-tag-spot">現貨</span>
+                    <div class="price-detail-head">
+                        <span class="price-tag-spot">現貨</span>
+                        <span class="price-detail-candle price-detail-candle-spot">${spotCandle}</span>
+                    </div>
                     <div class="price-val-spot">${Number(spot.close).toLocaleString()}</div>
                     <div class="price-detail-sub">
                         ${spotGain != null ? `<span class="price-detail-gain ${spotGain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base">${spotGain >= 0 ? '+' : ''}${(spotGain * 100).toFixed(2)}%</span>` : ''}
@@ -603,6 +665,8 @@
             if (!quote) return;
             const futCol = el.querySelector('.price-detail-futures');
             if (futCol) {
+                const futCandleEl = futCol.querySelector('.price-detail-candle-futures');
+                if (futCandleEl) futCandleEl.innerHTML = formatFuturesMiniCandle(stockId, 'md');
                 const futVal = futCol.querySelector('.price-val-futures');
                 if (futVal) futVal.textContent = Number(quote.close).toLocaleString();
                 const futGain = futCol.querySelector('.price-detail-gain');
@@ -615,6 +679,8 @@
             }
             const spotCol = el.querySelector('.price-detail-spot');
             if (spot?.close != null && spotCol) {
+                const spotCandleEl = spotCol.querySelector('.price-detail-candle-spot');
+                if (spotCandleEl) spotCandleEl.innerHTML = formatSpotMiniCandle(stockId, 'md');
                 const spotVal = spotCol.querySelector('.price-val-spot');
                 if (spotVal) spotVal.textContent = Number(spot.close).toLocaleString();
                 const spotGainVal = spot.previousClose > 0 ? (spot.close - spot.previousClose) / spot.previousClose : null;
@@ -628,6 +694,9 @@
             }
             const dateEl = el.querySelector('.price-detail-time');
             if (dateEl) dateEl.textContent = `數據 ${formatDataDateTime(quote.tradeDate, quote.time)}`;
+            if (spot?.close != null && !el.querySelector('.price-detail-spot')) {
+                updateStockAnalysisMeta(stockId);
+            }
         }
 
         function formatStockLiveMetric(quote, mode) {
@@ -643,6 +712,10 @@
             const p = getParams();
             document.querySelectorAll('#strong-table-body tr[data-stock-id]').forEach(tr => {
                 const id = tr.dataset.stockId;
+                const miniEl = tr.querySelector('.strong-mini-candle');
+                if (miniEl) miniEl.innerHTML = formatSpotMiniCandle(id);
+                const ampTd = tr.querySelector('.strong-col-spot-amp');
+                if (ampTd) ampTd.textContent = formatSpotAmplitude(id);
                 const quote = getStockLatestQuote(id);
                 if (!quote) return;
                 const priceTd = tr.querySelector('.strong-col-price');
@@ -711,13 +784,11 @@
         /** 台股即時輪詢時段（台北時間 08:45～13:45）；其餘時段只更新一次 */
         const QUOTE_SESSION_START = { h: 8, m: 45 };
         const QUOTE_SESSION_END = { h: 13, m: 45 };
-        const LIVE_QUOTE_LOCAL_PORT = 8765;
         const WANTGOO_QUOTES_URL = 'https://www.wantgoo.com/investrue/all-quote-info';
         const WANTGOO_FUTURES_URL = 'https://www.wantgoo.com/futures/all-stock-futures-list';
         /**
-         * GitHub Pages 即時報價：部署 quote_proxy_worker.js 到 Cloudflare Worker 後填入網址。
-         * 例：'https://stock-quote-proxy.你的帳號.workers.dev'（結尾不要 /）
-         * 留空則 GitHub Pages 改為定期重拉下方 GITHUB_DB_URL 的 ZIP。
+         * 即時報價代理（本機 file://、GitHub Pages 皆用此網址，免本機 server）。
+         * 留空則改為定期重拉下方 GITHUB_DB_URL 的 ZIP。
          */
         const LIVE_QUOTE_API_BASE = 'https://stock-crawer.pages.dev';
         const GITHUB_DB_URL = 'https://raw.githubusercontent.com/samuel100u/stock-futures_db/main/market.db.zip';
@@ -734,10 +805,6 @@
 
         function getLiveQuoteApiBase() {
             if (LIVE_QUOTE_API_BASE) return LIVE_QUOTE_API_BASE.replace(/\/$/, '');
-            if (location.protocol === 'file:') return `http://127.0.0.1:${LIVE_QUOTE_LOCAL_PORT}`;
-            if (location.hostname === '127.0.0.1' || location.hostname === 'localhost') {
-                return `${location.protocol}//${location.host}`;
-            }
             return null;
         }
 
@@ -754,10 +821,7 @@
             if (msg.includes('HTTP 404')) {
                 return `代理 API 404，請重新部署 Cloudflare Pages（需含 functions/ 資料夾）。測試：${fetchUrl}`;
             }
-            if (!LIVE_QUOTE_API_BASE && location.protocol === 'file:') {
-                return '請先執行 serve_dashboard.bat，或以 http://127.0.0.1:8765 開啟';
-            }
-            if (isGitHubPages() && !LIVE_QUOTE_API_BASE) {
+            if (!LIVE_QUOTE_API_BASE) {
                 return '請設定 LIVE_QUOTE_API_BASE 指向 Cloudflare Pages 代理網址';
             }
             return msg;
@@ -1056,12 +1120,12 @@
             }
         }
 
-        /** 本機 → serve_dashboard 即時報價；GitHub Pages + Worker → 即時報價；否則 → 定期重拉雲端 DB */
+        /** 有代理 → 即時報價；否則 → 定期重拉雲端 DB（file:// / GitHub Pages） */
         function startDataRefresh() {
             stopDataRefresh();
             if (getLiveQuoteApiBase()) {
                 startLiveQuotePolling();
-            } else if (isGitHubPages() && GITHUB_DB_REFRESH_MS > 0) {
+            } else if ((isGitHubPages() || location.protocol === 'file:') && GITHUB_DB_REFRESH_MS > 0) {
                 lastCloudDbAt = Date.now();
                 setCloudDbStatus('ok', `每 ${Math.round(GITHUB_DB_REFRESH_MS / 1000)} 秒同步`);
                 startCloudDbPolling();
@@ -1504,7 +1568,8 @@
                 const cbInfo = getCbInfo(v.id);
                 const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${v.id}')">CB</span>` : '';
 
-                tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td><td class="px-3 md:px-4 py-3.5"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></td><td class="strong-col-price px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${gainSign}${(v.gain*100).toFixed(2)}%</td><td class="strong-col-metric px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
+                const miniCandle = formatSpotMiniCandle(v.id);
+                tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td><td class="px-3 md:px-4 py-3.5"><div class="flex items-center gap-2.5"><span class="strong-mini-candle shrink-0">${miniCandle}</span><div class="min-w-0"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></div></div></td><td class="strong-col-price px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="strong-col-spot-amp px-3 md:px-4 py-3.5 text-right text-sky-300 font-mono font-semibold text-sm" style="font-variant-numeric:tabular-nums">${formatSpotAmplitude(v.id)}</td><td class="strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${gainSign}${(v.gain*100).toFixed(2)}%</td><td class="strong-col-metric px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
                 tableBody.appendChild(tr);
             });
             lucide.createIcons();
@@ -1592,33 +1657,33 @@
             priceChart = new Chart(ctx, {
                 plugins: [{ id: 'vLine', afterDraw: chart => { if (isBacktesting) { const {ctx, chartArea:{top, bottom}, scales:{x}} = chart; let lx = -1; for (let i=0; i<vals.length; i++) if (vals[i][0] <= p.deadline) lx = x.getPixelForValue(i); if (lx !== -1) { ctx.save(); ctx.beginPath(); ctx.setLineDash([5,5]); ctx.strokeStyle='#f43f5e'; ctx.moveTo(lx, top); ctx.lineTo(lx, bottom); ctx.stroke(); ctx.restore(); } } } }],
                 data: { labels, datasets: [{ type: 'line', label: '價格', data: prices, borderColor: '#60a5fa', borderWidth: 2.5, fill: false, tension: 0.3, pointRadius: 1, yAxisID: 'y', segment: { borderColor: ctx => (isBacktesting && vals[ctx.p0DataIndex][0] > p.deadline) ? 'rgba(148, 163, 184, 0.4)' : undefined, borderDash: ctx => (isBacktesting && vals[ctx.p0DataIndex][0] > p.deadline) ? [5, 5] : undefined } }, { type: 'bar', label: '量', data: volumes, backgroundColor: vals.map(v => (isBacktesting && v[0] > p.deadline) ? 'rgba(71, 85, 105, 0.3)' : 'rgba(250, 204, 21, 0.6)'), yAxisID: 'y1' }] },
-                options: { 
-                    responsive: true, 
-                    maintainAspectRatio: false, 
-                    interaction: { mode: 'index', intersect: false }, 
-                    scales: { 
-                        y: { position: 'left', grid: { color: '#1e293b' }, ticks: { font: { size: 9 }, color: '#64748b' } }, 
-                        y1: { position: 'right', display: false, max: Math.max(...volumes) * 4 }, 
-                        x: { 
-                            grid: { display: false }, 
-                            ticks: { 
-                                font: { size: 9 }, 
-                                color: '#64748b', 
-                                maxRotation: 45, 
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y: { position: 'left', grid: { color: '#1e293b' }, ticks: { font: { size: 9 }, color: '#64748b' } },
+                        y1: { position: 'right', display: false, max: Math.max(...volumes) * 4 },
+                        x: {
+                            grid: { display: false },
+                            ticks: {
+                                font: { size: 9 },
+                                color: '#64748b',
+                                maxRotation: 45,
                                 minRotation: 45,
                                 autoSkip: true,
                                 maxTicksLimit: 12
-                            } 
-                        } 
-                    }, 
-                    plugins: { 
-                        legend: { display: false }, 
-                        tooltip: { 
-                            callbacks: { 
-                                title: c => labels[c[0].dataIndex] 
-                            } 
-                        } 
-                    } 
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: c => labels[c[0].dataIndex]
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -1880,7 +1945,7 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
                 if (getLiveQuoteApiBase()) {
                     if (isActiveTradingSession()) refreshLiveQuotes();
                     else if (!liveQuoteOffSessionDone) refreshLiveQuotes();
-                } else if (isGitHubPages() && GITHUB_DB_REFRESH_MS > 0) {
+                } else if ((isGitHubPages() || location.protocol === 'file:') && GITHUB_DB_REFRESH_MS > 0) {
                     refreshCloudDatabase({ silent: true });
                 }
             });
