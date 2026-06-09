@@ -349,6 +349,33 @@
                         </div>
                     </div>
                 </div>
+
+                <div class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3">
+                        <div>
+                            <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                                <i data-lucide="trending-down" class="text-amber-400"></i> 全期貨 · 現貨自高點回落
+                            </h4>
+                            <p class="text-slate-500 text-xs md:text-sm mt-1">基準日當日、符合最低成交量等參數的全部期貨（不看漲幅門檻／分析天數），現貨自高點回落 ≥ 4%</p>
+                        </div>
+                        <div id="spot-pullback-count-badge" class="bg-amber-600/15 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-lg text-xs font-bold">-- 筆符合</div>
+                    </div>
+                    <div class="scrollable-table border border-slate-800 rounded-xl">
+                        <table class="stock-table w-full text-left text-sm md:text-base">
+                            <thead class="sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 md:px-3 py-3 font-bold text-center w-10">#</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold text-right">現貨 / 最高</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold text-right">回落幅度</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold text-center">看圖</th>
+                                </tr>
+                            </thead>
+                            <tbody id="spot-pullback-table-body" class="divide-y divide-slate-800"></tbody>
+                        </table>
+                    </div>
+                    <div id="spot-pullback-empty" class="hidden p-8 text-center text-slate-500 text-sm">暫無符合條件之標的（需等即時現貨報價載入）</div>
+                </div>
             </div>
 
             <!-- 量能異動監控分頁 -->
@@ -442,7 +469,7 @@
         const CANDLE_DOWN = '#22c55e';
         const CANDLE_NEUTRAL = '#64748b';
         let stockTagsMap = {};
-        let currentStrongList = [], currentSurgeList = [], currentReferenceDate = "", currentReferenceTimestamp = 0;
+        let currentStrongList = [], currentPullbackUniverse = [], currentSurgeList = [], currentReferenceDate = "", currentReferenceTimestamp = 0;
         let currentAnalysisPeriodStart = 0, currentAvgDays = 1;
         let blacklist = JSON.parse(localStorage.getItem('stock_blacklist') || '[]');
         // 💎 修復：確保 getParams 在腳本最頂部定義，且具備安全性檢查
@@ -584,6 +611,119 @@
             const high = Number(spot?.high), low = Number(spot?.low);
             if (!Number.isFinite(high) || !Number.isFinite(low) || low <= 0) return '--';
             return `${(((high / low) - 1) * 100).toFixed(1)}%`;
+        }
+
+        const SPOT_PULLBACK_MIN = 0.04;
+
+        /** 現貨自高點回落：(最高價 - 現價) / 最高價 */
+        function getSpotPullbackFromHigh(stockId) {
+            const spot = getSpotQuote(stockId);
+            const high = Number(spot?.high), close = Number(spot?.close);
+            if (!Number.isFinite(high) || !Number.isFinite(close) || high <= 0) return null;
+            if (close >= high) return 0;
+            return (high - close) / high;
+        }
+
+        function formatSpotPullbackPct(pullback) {
+            if (pullback == null || !Number.isFinite(pullback)) return '--';
+            return `${(pullback * 100).toFixed(1)}%`;
+        }
+
+        function formatSpotPriceHighCell(stockId) {
+            const spot = getSpotQuote(stockId);
+            const close = Number(spot?.close), high = Number(spot?.high);
+            if (!Number.isFinite(close) || !Number.isFinite(high)) return '--';
+            return `<div class="price-pair-cell">
+                <div class="price-row"><span class="price-tag-spot">現貨</span><span class="price-val-spot">${close.toLocaleString()}</span></div>
+                <div class="price-row"><span class="price-tag-futures">最高</span><span class="price-val-futures">${high.toLocaleString()}</span></div>
+            </div>`;
+        }
+
+        /** 回落區塊：僅基準日當日成交量，不看漲幅門檻與分析天數 */
+        function buildPullbackUniverse(latestDate, p) {
+            const dayRes = db.exec(`SELECT stockId, name, volume, ${TRADE_VALUE_M_SQL} as val_m FROM market_data WHERE tradeDate = ${latestDate}`);
+            if (!dayRes.length) return [];
+            const list = [];
+            dayRes[0].values.forEach(v => {
+                const [id, name, vol, valM] = v;
+                const metric = p.mode === 'value' ? valM : vol;
+                if (metric < p.minThreshold) return;
+                if (p.excludeETF && isETF(id, name)) return;
+                if (p.excludeFinance && isFinanceStock(id, name)) return;
+                if (blacklist.find(b => b.id === id)) return;
+                list.push({ id, name });
+            });
+            return list;
+        }
+
+        function buildSpotPullbackList() {
+            return currentPullbackUniverse
+                .map(s => {
+                    const pullback = getSpotPullbackFromHigh(s.id);
+                    return pullback != null && pullback >= SPOT_PULLBACK_MIN
+                        ? { id: s.id, name: s.name, pullback }
+                        : null;
+                })
+                .filter(Boolean)
+                .sort((a, b) => b.pullback - a.pullback);
+        }
+
+        function renderSpotPullbackSection() {
+            const list = buildSpotPullbackList();
+            const tableBody = document.getElementById('spot-pullback-table-body');
+            const emptyEl = document.getElementById('spot-pullback-empty');
+            const badgeEl = document.getElementById('spot-pullback-count-badge');
+            const tableWrap = tableBody?.closest('.scrollable-table');
+            if (!tableBody) return;
+
+            if (badgeEl) badgeEl.textContent = `${list.length} 筆符合`;
+
+            if (!list.length) {
+                tableBody.innerHTML = '';
+                if (tableWrap) tableWrap.classList.add('hidden');
+                if (emptyEl) emptyEl.classList.remove('hidden');
+                return;
+            }
+
+            if (tableWrap) tableWrap.classList.remove('hidden');
+            if (emptyEl) emptyEl.classList.add('hidden');
+
+            tableBody.innerHTML = '';
+            list.forEach((v, i) => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800 transition';
+                tr.dataset.stockId = v.id;
+                const rank = i + 1;
+                const rankClass = rank <= 3 ? 'stock-rank rank-top' : 'stock-rank';
+                const miniCandle = formatSpotMiniCandle(v.id);
+                tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td>
+                    <td class="px-3 md:px-4 py-3.5">
+                        <div class="flex items-center gap-2.5">
+                            <span class="spot-pullback-mini-candle shrink-0">${miniCandle}</span>
+                            <div class="min-w-0">
+                                <div class="stock-code">${v.id}</div>
+                                <div class="stock-name">${escapeHtml(v.name)}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="spot-pullback-col-price px-3 md:px-4 py-3.5 text-right">${formatSpotPriceHighCell(v.id)}</td>
+                    <td class="spot-pullback-col-pct px-3 md:px-4 py-3.5 text-right font-bold text-base text-amber-300" style="font-variant-numeric:tabular-nums">${formatSpotPullbackPct(v.pullback)}</td>
+                    <td class="px-3 md:px-4 py-3.5 text-center">
+                        <button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button>
+                    </td>`;
+                tableBody.appendChild(tr);
+            });
+            lucide.createIcons();
+        }
+
+        /** 每 10 秒即時 tick：重算當日 universe（含最新成交量）並完整重繪回落清單 */
+        function refreshSpotPullbackSectionOnTick() {
+            if (!db) return;
+            const p = getParams();
+            const latestDateRes = db.exec(`SELECT MAX(tradeDate) FROM market_data WHERE tradeDate <= ${p.deadline}`);
+            if (!latestDateRes.length || !latestDateRes[0].values[0][0]) return;
+            currentPullbackUniverse = buildPullbackUniverse(latestDateRes[0].values[0][0], p);
+            renderSpotPullbackSection();
         }
 
         function formatFuturesSpotPriceCell(stockId, futuresClose) {
@@ -766,6 +906,7 @@
 
         function applyLiveQuoteTick() {
             patchStrongTableLive();
+            refreshSpotPullbackSectionOnTick();
             patchOverviewStatsLive();
             const sid = stockSelectInstance?.getValue() || '';
             if (sid) {
@@ -1522,26 +1663,26 @@
             for (const id in stats) {
                 const base = latestDataMap[id]; if (!base) continue;
 
-                // 💎 智慧漲幅邏輯判定
-                let gain = 0;
-                if (p.avgDays === 1) {
-                    // 天數=1：當日漲幅 (今日收盤 - 昨日收盤) / 昨日收盤
-                    gain = base[3] > 0 ? (base[2] - base[3]) / base[3] : 0;
-                } else {
-                    // 天數>1：波段漲幅 (時段內最高 - 時段內最低) / 時段內最低
-                    gain = stats[id].minClose > 0 ? (stats[id].maxClose - stats[id].minClose) / stats[id].minClose : 0;
-                }
-
                 const metric = p.mode === 'value' ? stats[id].valSum / stats[id].count : stats[id].volSum / stats[id].count;
-                if (gain < p.changePct || metric < p.minThreshold) continue;
+                if (metric < p.minThreshold) continue;
                 if (p.excludeETF && isETF(id, base[1])) continue;
                 if (p.excludeFinance && isFinanceStock(id, base[1])) continue;
                 if (blacklist.find(b => b.id === id)) continue;
+
+                // 💎 智慧漲幅邏輯判定（強勢清單）
+                let gain = 0;
+                if (p.avgDays === 1) {
+                    gain = base[3] > 0 ? (base[2] - base[3]) / base[3] : 0;
+                } else {
+                    gain = stats[id].minClose > 0 ? (stats[id].maxClose - stats[id].minClose) / stats[id].minClose : 0;
+                }
+                if (gain < p.changePct) continue;
                 validStocks.push({ id, name: base[1], close: base[2], tags: getTagsLabel(id), primaryTag: getPrimaryTag(id), avgMetric: metric, gain });
             }
 
             validStocks.sort((a, b) => b.avgMetric - a.avgMetric);
             currentStrongList = validStocks.map(v => ({ id: v.id, name: v.name, pct: (v.gain * 100).toFixed(2) }));
+            currentPullbackUniverse = buildPullbackUniverse(latestDate, p);
 
             // 更新清單旁的日期標註
             const dateEl = document.getElementById('overview-db-date');
@@ -1584,6 +1725,7 @@
                 tags.forEach(tag => { tagCounts[tag] = (tagCounts[tag] || 0) + 1; });
             });
             renderTagRankList(tagCounts);
+            renderSpotPullbackSection();
 
             const allStocksQuery = db.exec(`SELECT m.stockId, m.name FROM market_data m WHERE m.tradeDate <= ${latestDate} GROUP BY m.stockId ORDER BY m.name ASC`);
             if (allStocksQuery.length) {
