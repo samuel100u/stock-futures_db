@@ -519,9 +519,105 @@
                 ${quoteDate ? `<span class="text-slate-400 text-sm self-end pb-1">數據 ${quoteDate}</span>` : ''}
             </div>` : '';
             el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1">
-                <span class="font-bold text-slate-100 text-base">${escapeHtml(stockId)}</span>
+                <span class="stock-meta-code font-bold text-slate-100 text-base">${escapeHtml(stockId)}</span>
                 ${name ? `<span class="text-slate-400">${escapeHtml(name)}</span>` : ''}
             </div>${priceHtml}<div class="flex flex-wrap gap-1.5 mt-2">${tagHtml}</div>`;
+        }
+
+        function patchStockAnalysisLive(stockId) {
+            const el = document.getElementById('stock-analysis-meta');
+            if (!el || !stockId) return;
+            const codeEl = el.querySelector('.stock-meta-code');
+            if (!codeEl || codeEl.textContent !== stockId) return;
+            const quote = getStockLatestQuote(stockId);
+            const spot = getSpotQuote(stockId);
+            if (!quote) return;
+            const futVal = el.querySelector('.price-val-futures');
+            if (futVal) futVal.textContent = Number(quote.close).toLocaleString();
+            const futGain = el.querySelector('.price-detail-item .price-tag-futures')?.parentElement?.querySelector('.font-bold.text-base');
+            if (futGain) {
+                futGain.className = `${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base`;
+                futGain.textContent = `${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%`;
+            }
+            const futVol = el.querySelector('.price-detail-item .price-tag-futures')?.parentElement?.querySelector('.text-slate-400');
+            if (futVol) futVol.textContent = `量 ${(quote.volume / 1000).toFixed(1)}K`;
+            const spotVal = el.querySelector('.price-val-spot');
+            if (spot?.close != null && spotVal) spotVal.textContent = Number(spot.close).toLocaleString();
+            if (spot?.close != null) {
+                const spotGain = spot.previousClose > 0 ? (spot.close - spot.previousClose) / spot.previousClose : null;
+                const spotBlock = el.querySelector('.price-tag-spot')?.parentElement;
+                if (spotBlock) {
+                    const spotGainEl = spotBlock.querySelector('.font-bold.text-base');
+                    if (spotGainEl && spotGain != null) {
+                        spotGainEl.className = `${spotGain >= 0 ? 'text-rose-400' : 'text-emerald-400'} font-bold text-base`;
+                        spotGainEl.textContent = `${spotGain >= 0 ? '+' : ''}${(spotGain * 100).toFixed(2)}%`;
+                    }
+                    const spotVolEl = spotBlock.querySelector('.text-slate-400');
+                    if (spotVolEl && spot.volume != null) spotVolEl.textContent = `量 ${(spot.volume / 1000).toFixed(1)}K`;
+                }
+            }
+            const dateEl = el.querySelector('.price-detail-block > .text-slate-400');
+            if (dateEl) dateEl.textContent = `數據 ${formatDataDateTime(quote.tradeDate, quote.time)}`;
+        }
+
+        function patchStrongTableLive() {
+            const p = getParams();
+            document.querySelectorAll('#strong-table-body tr[data-stock-id]').forEach(tr => {
+                const id = tr.dataset.stockId;
+                const quote = getStockLatestQuote(id);
+                if (!quote) return;
+                const priceTd = tr.querySelector('.strong-col-price');
+                if (priceTd) priceTd.innerHTML = formatFuturesSpotPriceCell(id, quote.close);
+                if (p.avgDays === 1) {
+                    const gainTd = tr.querySelector('.strong-col-gain');
+                    if (gainTd) {
+                        gainTd.className = `strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'}`;
+                        gainTd.textContent = `${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%`;
+                    }
+                }
+            });
+        }
+
+        function patchOverviewStatsLive() {
+            const p = getParams();
+            const latestDateRes = db.exec(`SELECT MAX(tradeDate) FROM market_data WHERE tradeDate <= ${p.deadline}`);
+            if (!latestDateRes.length || !latestDateRes[0].values[0][0]) return;
+            const latestDate = latestDateRes[0].values[0][0];
+            const dateStr = getLatestDataDateTime(latestDate);
+            const dateEl = document.getElementById('overview-db-date');
+            if (dateEl) dateEl.innerText = `(數據日期: ${dateStr})`;
+            const statDate = document.getElementById('stat-date');
+            if (statDate) statDate.innerText = dateStr;
+            const totalMetricRes = db.exec(`SELECT ${p.mode === 'value' ? `SUM(${TRADE_VALUE_M_SQL})` : 'SUM(volume)'} FROM market_data WHERE tradeDate = ${latestDate}`);
+            const statVol = document.getElementById('stat-volume');
+            if (statVol && totalMetricRes.length) {
+                statVol.innerText = p.mode === 'value'
+                    ? formatTradeValueMillion(totalMetricRes[0].values[0][0])
+                    : (totalMetricRes[0].values[0][0] || 0).toLocaleString();
+            }
+        }
+
+        function updatePriceChartLive(stockId) {
+            if (!priceChart || priceChartStockId !== stockId || !db) return;
+            const res = db.exec(`SELECT tradeDate, close, volume FROM market_data WHERE stockId = '${stockId}' ORDER BY tradeDate ASC`);
+            if (!res.length) return;
+            const vals = res[0].values;
+            const lastIdx = vals.length - 1;
+            const volumes = vals.map(v => v[2]);
+            priceChart.data.datasets[0].data[lastIdx] = vals[lastIdx][1];
+            priceChart.data.datasets[1].data[lastIdx] = vals[lastIdx][2];
+            if (priceChart.options.scales.y1) priceChart.options.scales.y1.max = Math.max(...volumes) * 4;
+            priceChart.update('none');
+        }
+
+        function applyLiveQuoteTick() {
+            patchStrongTableLive();
+            patchOverviewStatsLive();
+            const sid = stockSelectInstance?.getValue() || '';
+            if (sid) {
+                patchStockAnalysisLive(sid);
+                updatePriceChartLive(sid);
+            }
         }
 
         // 成交金額（百萬）：小型 1口=100股，標準 1口=2000股 → 元 / 1e6
@@ -529,6 +625,8 @@
 
         /** 即時報價輪詢間隔（毫秒）；僅更新 WASM 記憶體內 db，不寫入本機 market.db */
         const LIVE_QUOTE_REFRESH_MS = 10000;
+        /** 盤中完整重算排行／題材的間隔（毫秒）；其間只就地更新價格數字 */
+        const LIVE_ANALYZE_REFRESH_MS = 120000;
         /** 台股即時輪詢時段（台北時間 08:45～13:45）；其餘時段只更新一次 */
         const QUOTE_SESSION_START = { h: 8, m: 45 };
         const QUOTE_SESSION_END = { h: 13, m: 45 };
@@ -547,7 +645,7 @@
 
         let liveQuoteTimerId = null, liveQuoteSessionTimerId = null, cloudDbTimerId = null, futuresMapCache = null;
         let liveQuoteInFlight = false, cloudDbInFlight = false, lastLiveQuoteAt = 0, lastCloudDbAt = 0;
-        let liveQuoteOffSessionDone = false;
+        let liveQuoteOffSessionDone = false, lastFullAnalyzeAt = 0, priceChartStockId = null;
 
         function isGitHubPages() {
             return /\.github\.io$/i.test(location.hostname);
@@ -705,7 +803,7 @@
             return Math.max(1000, taipeiLocalToUtcMs(tp.year, tp.month, tp.day, QUOTE_SESSION_START.h, QUOTE_SESSION_START.m) - now);
         }
 
-        function setLiveQuoteStatus(state, detail) {
+        function setLiveQuoteStatus(state, detail, { silent = false } = {}) {
             const el = document.getElementById('db-status');
             if (!el) return;
             const timeStr = lastLiveQuoteAt
@@ -713,10 +811,21 @@
                 : '';
             const sessionLabel = isActiveTradingSession() ? '盤中' : '非盤中';
             if (state === 'loading') {
+                if (silent) return;
                 el.innerHTML = `<i data-lucide="loader-2" class="text-blue-400 animate-spin" size="14"></i> 更新即時報價中…`;
             } else if (state === 'ok') {
-                el.innerHTML = `<i data-lucide="radio" class="text-emerald-500" size="14"></i> ${sessionLabel} ${timeStr}${detail != null ? ` · ${detail}` : ''}`;
+                const detailStr = detail != null ? ` · ${detail}` : '';
+                if (silent && el.dataset.liveQuoteOk === '1') {
+                    const timeEl = document.getElementById('live-quote-time');
+                    const detailEl = document.getElementById('live-quote-detail');
+                    if (timeEl) timeEl.textContent = timeStr;
+                    if (detailEl) detailEl.textContent = detailStr;
+                    return;
+                }
+                el.dataset.liveQuoteOk = '1';
+                el.innerHTML = `<i data-lucide="radio" class="text-emerald-500" size="14"></i> ${sessionLabel} <span id="live-quote-time">${timeStr}</span><span id="live-quote-detail">${detailStr}</span>`;
             } else {
+                el.dataset.liveQuoteOk = '';
                 el.innerHTML = `<i data-lucide="alert-circle" class="text-amber-500" size="14"></i> 即時報價失敗${detail ? `：${detail}` : ''}`;
             }
             lucide.createIcons();
@@ -725,19 +834,22 @@
         async function refreshLiveQuotes() {
             if (!db || liveQuoteInFlight || document.hidden) return;
             liveQuoteInFlight = true;
+            const silent = lastLiveQuoteAt > 0;
             try {
-                setLiveQuoteStatus('loading');
+                if (!silent) setLiveQuoteStatus('loading');
                 const quotes = await fetchWantgooJson(WANTGOO_QUOTES_URL);
                 updateSpotQuoteCacheFromQuotes(quotes);
                 const count = upsertQuotesToMemoryDb(quotes);
                 lastLiveQuoteAt = Date.now();
-                setLiveQuoteStatus('ok', count);
-                const activeSid = stockSelectInstance?.getValue() || '';
-                tryAnalyze();
-                const sid = stockSelectInstance?.getValue() || activeSid;
-                if (sid) {
-                    updateStockAnalysisMeta(sid);
-                    updatePriceTrend(sid);
+                setLiveQuoteStatus('ok', count, { silent });
+                applyLiveQuoteTick();
+                const now = Date.now();
+                if (!lastFullAnalyzeAt || now - lastFullAnalyzeAt >= LIVE_ANALYZE_REFRESH_MS) {
+                    lastFullAnalyzeAt = now;
+                    const activeSid = stockSelectInstance?.getValue() || '';
+                    tryAnalyze();
+                    const sid = stockSelectInstance?.getValue() || activeSid;
+                    if (sid) updatePriceTrend(sid);
                 }
             } catch (e) {
                 console.error('Live quote refresh failed:', e);
@@ -906,7 +1018,15 @@
             applyOverviewThresholdForMode(newMode);
         }
 
-        function tryAnalyze() { if(!db) return; try { processOverview(); processSurgeAnalysis(); renderBlacklist(); } catch (e) { console.error("分析錯誤:", e); showToast("分析執行出錯"); } }
+        function tryAnalyze() {
+            if (!db) return;
+            try {
+                processOverview();
+                processSurgeAnalysis();
+                renderBlacklist();
+                lastFullAnalyzeAt = Date.now();
+            } catch (e) { console.error("分析錯誤:", e); showToast("分析執行出錯"); }
+        }
 
         // 黑名單管理
         function addToBlacklist(id, name) {
@@ -1281,14 +1401,18 @@
 
             const tableBody = document.getElementById('strong-table-body'); tableBody.innerHTML = '';
             validStocks.forEach(v => {
-                const tr = document.createElement('tr'); tr.className = 'hover:bg-slate-800 transition';
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800 transition';
+                tr.dataset.stockId = v.id;
                 const displayMetric = p.mode === 'value' ? formatTradeValueMillion(v.avgMetric) : (v.avgMetric/1000).toFixed(0) + 'K';
-                
+                const gainClass = v.gain >= 0 ? 'text-rose-400' : 'text-emerald-400';
+                const gainSign = v.gain >= 0 ? '+' : '';
+
                 // 檢查是否有 CB
                 const cbInfo = getCbInfo(v.id);
                 const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${v.id}')">CB</span>` : '';
 
-                tr.innerHTML = `<td class="px-3 md:px-4 py-3.5"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></td><td class="px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="px-3 md:px-4 py-3.5 text-right text-rose-400 font-bold text-base">+${(v.gain*100).toFixed(2)}%</td><td class="px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
+                tr.innerHTML = `<td class="px-3 md:px-4 py-3.5"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></td><td class="strong-col-price px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${gainSign}${(v.gain*100).toFixed(2)}%</td><td class="px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
                 tableBody.appendChild(tr);
             });
             lucide.createIcons();
@@ -1371,6 +1495,7 @@
             const prices = vals.map(v => v[1]); const volumes = vals.map(v => v[2]);
             const isBacktesting = p.deadline < vals[vals.length-1][0];
             if (priceChart) priceChart.destroy();
+            priceChartStockId = stockId;
             const ctx = document.getElementById('priceChart').getContext('2d');
             priceChart = new Chart(ctx, {
                 plugins: [{ id: 'vLine', afterDraw: chart => { if (isBacktesting) { const {ctx, chartArea:{top, bottom}, scales:{x}} = chart; let lx = -1; for (let i=0; i<vals.length; i++) if (vals[i][0] <= p.deadline) lx = x.getPixelForValue(i); if (lx !== -1) { ctx.save(); ctx.beginPath(); ctx.setLineDash([5,5]); ctx.strokeStyle='#f43f5e'; ctx.moveTo(lx, top); ctx.lineTo(lx, bottom); ctx.stroke(); ctx.restore(); } } } }],
