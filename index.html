@@ -938,7 +938,7 @@
 
         let liveQuoteTimerId = null, liveQuoteSessionTimerId = null, cloudDbTimerId = null, futuresMapCache = null;
         let liveQuoteInFlight = false, cloudDbInFlight = false, lastLiveQuoteAt = 0, lastCloudDbAt = 0;
-        let liveQuoteOffSessionDone = false, lastFullAnalyzeAt = 0, priceChartStockId = null, liveQuoteSyncedOnce = false;
+        let liveQuoteOffSessionDone = false, lastFullAnalyzeAt = 0, priceChartStockId = null, liveQuoteSyncedOnce = false, liveQuoteFailStreak = 0;
 
         function isGitHubPages() {
             return /\.github\.io$/i.test(location.hostname);
@@ -959,13 +959,99 @@
 
         function formatLiveQuoteError(err, fetchUrl) {
             const msg = err?.message || String(err);
+            if (msg === 'Failed to fetch' || msg.includes('NetworkError')) {
+                return `無法連線代理（CORS／503）：請重新部署 Cloudflare Pages 的 pages-proxy/_worker.js。測試：${fetchUrl}`;
+            }
             if (msg.includes('HTTP 404')) {
-                return `代理 API 404，請重新部署 Cloudflare Pages（需含 functions/ 資料夾）。測試：${fetchUrl}`;
+                return `代理 API 404，請重新部署 Cloudflare Pages（需含 _worker.js）。測試：${fetchUrl}`;
+            }
+            if (msg.includes('upstream HTTP 403')) {
+                return `WantGoo 拒絕代理請求（403），請重新部署最新 Worker 後再試。`;
             }
             if (!LIVE_QUOTE_API_BASE) {
                 return '請設定 LIVE_QUOTE_API_BASE 指向 Cloudflare Pages 代理網址';
             }
             return msg;
+        }
+
+        async function fetchProxyJson(path) {
+            const base = getLiveQuoteApiBase();
+            if (!base) throw new Error('LIVE_QUOTE_API_BASE 未設定');
+            const resp = await fetch(`${base}${path}`, { cache: 'no-store', mode: 'cors' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (data && data.error) throw new Error(data.error);
+            return data;
+        }
+
+        function mergeQuotesFuturesClient(quotes, futures) {
+            const futuresMap = {};
+            for (const item of futures) {
+                if (item?.stockId) futuresMap[item.id] = item;
+            }
+            const spotByStockId = {};
+            for (const q of quotes) {
+                const id = String(q.id ?? '');
+                if (/^\d{4}$/.test(id)) {
+                    spotByStockId[id] = {
+                        open: q.open ?? null,
+                        high: q.high ?? null,
+                        low: q.low ?? null,
+                        close: q.close ?? null,
+                        volume: q.volume ?? null,
+                        previousClose: q.previousClose ?? null,
+                        time: q.time ?? null,
+                    };
+                }
+            }
+            const slim = [];
+            for (const q of quotes) {
+                const mapping = futuresMap[q.id];
+                if (!mapping?.stockId) continue;
+                const spot = spotByStockId[mapping.stockId];
+                slim.push({
+                    stockId: mapping.stockId,
+                    name: mapping.name,
+                    tradeDate: q.tradeDate ?? null,
+                    time: q.time ?? null,
+                    flat: q.flat ?? null,
+                    floor: q.floor ?? null,
+                    ceil: q.ceil ?? null,
+                    open: q.open ?? null,
+                    high: q.high ?? null,
+                    low: q.low ?? null,
+                    close: q.close ?? null,
+                    volume: q.volume ?? null,
+                    millionAmount: q.millionAmount ?? null,
+                    previousClose: q.previousClose ?? null,
+                    previousVolume: q.previousVolume ?? null,
+                    previousMillionAmount: q.previousMillionAmount ?? null,
+                    spotOpen: spot?.open ?? null,
+                    spotHigh: spot?.high ?? null,
+                    spotLow: spot?.low ?? null,
+                    spotClose: spot?.close ?? null,
+                    spotVolume: spot?.volume ?? null,
+                    spotPreviousClose: spot?.previousClose ?? null,
+                    spotTime: spot?.time ?? null,
+                });
+            }
+            return slim;
+        }
+
+        async function fetchQuotesFuturesViaProxy() {
+            try {
+                return await fetchProxyJson('/api/quotes-futures');
+            } catch (primaryErr) {
+                try {
+                    const [quotes, futures] = await Promise.all([
+                        fetchProxyJson('/api/quotes'),
+                        fetchProxyJson('/api/futures'),
+                    ]);
+                    return mergeQuotesFuturesClient(quotes, futures);
+                } catch {
+                    throw primaryErr;
+                }
+            }
         }
         const MARKET_DATA_UPSERT_SQL = `INSERT INTO market_data (
             stockId, name, tradeDate, time, flat, floor, ceil, open, high, low, close,
@@ -996,6 +1082,9 @@
             };
             if (viaLocalApi) {
                 try {
+                    if (url.includes('all-quote-info')) {
+                        return await fetchQuotesFuturesViaProxy();
+                    }
                     return await fetchJson(target, false);
                 } catch (err) {
                     throw new Error(formatLiveQuoteError(err, target));
@@ -1127,6 +1216,7 @@
                 updateSpotQuoteCacheFromQuotes(quotes);
                 const count = upsertQuotesToMemoryDb(quotes);
                 lastLiveQuoteAt = Date.now();
+                liveQuoteFailStreak = 0;
                 setLiveQuoteStatus('ok', count, { silent });
                 applyLiveQuoteTick();
                 const now = Date.now();
@@ -1141,7 +1231,10 @@
                     if (sid) updatePriceTrend(sid);
                 }
             } catch (e) {
-                console.error('Live quote refresh failed:', e);
+                liveQuoteFailStreak++;
+                if (liveQuoteFailStreak <= 2 || liveQuoteFailStreak % 6 === 0) {
+                    console.error('Live quote refresh failed:', e);
+                }
                 setLiveQuoteStatus('err', e.message);
             } finally {
                 liveQuoteInFlight = false;
