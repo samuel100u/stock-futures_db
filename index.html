@@ -302,7 +302,7 @@
         <div id="welcome-screen" class="glass-card rounded-2xl md:rounded-3xl p-8 md:p-12 text-center">
             <div class="inline-flex p-3 md:p-4 bg-blue-900/30 text-blue-400 rounded-full mb-4 md:mb-6"><i id="loading-icon" data-lucide="loader" class="animate-spin" size="32"></i></div>
             <h2 id="welcome-title" class="text-xl md:text-2xl font-bold text-slate-200 mb-2 md:mb-4">正在同步雲端數據...</h2>
-            <p class="text-slate-500 text-sm max-w-xs mx-auto">請稍候，正在從 GitHub 獲取最新市場資料。</p>
+            <p id="welcome-subtitle" class="text-slate-500 text-sm max-w-xs mx-auto">請稍候，正在從 GitHub 獲取最新市場資料。</p>
         </div>
 
         <div id="dashboard-content" class="hidden space-y-4 md:space-y-8">
@@ -459,10 +459,10 @@
                 <i data-lucide="key-round" class="text-amber-400" size="22"></i>
                 <h3 class="text-lg font-bold text-slate-100">輸入 API 金鑰</h3>
             </div>
-            <p class="text-sm text-slate-400 mb-4">請輸入即時報價代理金鑰。儲存後寫入 Cookie，下次開啟無需再輸入。</p>
+            <p class="text-sm text-slate-400 mb-4">請輸入 API 金鑰。驗證後將載入市場資料並啟用即時報價；金鑰存於 Cookie，下次無需再輸入。</p>
             <input type="password" id="access-key-modal-input" autocomplete="off" placeholder="API 金鑰" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white mb-4 focus:border-blue-500 outline-none">
             <p id="access-key-modal-error" class="hidden text-sm text-rose-400 mb-3"></p>
-            <button type="button" onclick="submitAccessKeyModal()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold transition">確認並啟用即時報價</button>
+            <button type="button" onclick="submitAccessKeyModal()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold transition">確認並載入資料</button>
         </div>
     </div>
 
@@ -977,6 +977,59 @@
             return null;
         }
 
+        function requiresAccessKey() {
+            return !!getLiveQuoteApiBase();
+        }
+
+        function showWelcomeWaitingForKey() {
+            document.getElementById('welcome-screen')?.classList.remove('hidden');
+            document.getElementById('dashboard-content')?.classList.add('hidden');
+            document.getElementById('settings-panel')?.classList.add('hidden');
+            const title = document.getElementById('welcome-title');
+            const subtitle = document.getElementById('welcome-subtitle');
+            const icon = document.getElementById('loading-icon');
+            if (title) {
+                title.innerText = '請輸入 API 金鑰';
+                title.classList.remove('text-rose-400');
+            }
+            if (subtitle) subtitle.innerText = '輸入金鑰後才會下載市場資料並啟用儀表板。';
+            if (icon) {
+                icon.setAttribute('data-lucide', 'key-round');
+                icon.classList.remove('animate-spin', 'text-blue-400', 'text-rose-400');
+                icon.classList.add('text-amber-400');
+            }
+            lucide.createIcons();
+        }
+
+        function showWelcomeLoading() {
+            const title = document.getElementById('welcome-title');
+            const subtitle = document.getElementById('welcome-subtitle');
+            const icon = document.getElementById('loading-icon');
+            if (title) {
+                title.innerText = '正在同步雲端數據...';
+                title.classList.remove('text-rose-400');
+            }
+            if (subtitle) subtitle.innerText = '請稍候，正在從 GitHub 獲取最新市場資料。';
+            if (icon) {
+                icon.setAttribute('data-lucide', 'loader');
+                icon.classList.add('animate-spin', 'text-blue-400');
+                icon.classList.remove('text-amber-400', 'text-rose-400');
+            }
+            lucide.createIcons();
+        }
+
+        function resetDashboardToKeyGate() {
+            stopDataRefresh();
+            if (db) {
+                db.close();
+                db = null;
+            }
+            liveQuoteSyncedOnce = false;
+            lastLiveQuoteAt = 0;
+            showWelcomeWaitingForKey();
+            showAccessKeyModal();
+        }
+
         function getLiveQuoteAccessKey() {
             const m = document.cookie.match(new RegExp('(?:^|; )' + ACCESS_KEY_COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
             return m ? decodeURIComponent(m[1]) : '';
@@ -1029,44 +1082,54 @@
             document.getElementById('access-key-modal-error')?.classList.add('hidden');
         }
 
-        function applyAccessKeyAndStartLive(key) {
+        async function applyAccessKeyAndStartLive(key) {
             setLiveQuoteAccessKey(key);
             hideAccessKeyModal();
             stopDataRefresh();
-            if (db && getLiveQuoteApiBase()) {
+            if (!db) {
+                showWelcomeLoading();
+                try {
+                    await fetchRemoteDatabase();
+                    showToast('API 金鑰已儲存，資料載入完成');
+                } catch (e) {
+                    showWelcomeWaitingForKey();
+                    showAccessKeyModal(e.message || '載入失敗');
+                }
+            } else {
                 startLiveQuotePolling();
                 showToast('API 金鑰已儲存，即時報價已啟用');
             }
         }
 
-        window.submitAccessKeyModal = () => {
+        window.submitAccessKeyModal = async () => {
             const input = document.getElementById('access-key-modal-input');
             const key = (input?.value || '').trim();
             if (!key) {
                 showAccessKeyModal('請輸入金鑰');
                 return;
             }
-            applyAccessKeyAndStartLive(key);
+            const btn = document.querySelector('#access-key-modal button');
+            if (btn) btn.disabled = true;
+            try {
+                await applyAccessKeyAndStartLive(key);
+            } finally {
+                if (btn) btn.disabled = false;
+            }
         };
 
-        window.saveAccessKeyFromSettings = () => {
+        window.saveAccessKeyFromSettings = async () => {
             const input = document.getElementById('param-access-key');
             const key = (input?.value || '').trim();
             if (!key) {
                 showToast('請輸入金鑰');
                 return;
             }
-            applyAccessKeyAndStartLive(key);
+            await applyAccessKeyAndStartLive(key);
         };
 
         window.clearAccessKeyFromSettings = () => {
             clearLiveQuoteAccessKey();
-            stopLiveQuotePolling();
-            if (getLiveQuoteApiBase()) {
-                document.getElementById('db-status').innerHTML = `<i data-lucide="key-round" class="text-amber-500" size="14"></i> 請輸入 API 金鑰以啟用即時報價`;
-                lucide.createIcons();
-                showAccessKeyModal();
-            }
+            resetDashboardToKeyGate();
             showToast('已清除 API 金鑰');
         };
 
@@ -1495,12 +1558,7 @@
         function startDataRefresh() {
             stopDataRefresh();
             if (getLiveQuoteApiBase()) {
-                if (!getLiveQuoteAccessKey()) {
-                    document.getElementById('db-status').innerHTML = `<i data-lucide="key-round" class="text-amber-500" size="14"></i> 請輸入 API 金鑰以啟用即時報價`;
-                    lucide.createIcons();
-                    showAccessKeyModal();
-                    return;
-                }
+                if (!getLiveQuoteAccessKey() || !db) return;
                 startLiveQuotePolling();
             } else if ((isGitHubPages() || location.protocol === 'file:') && GITHUB_DB_REFRESH_MS > 0) {
                 lastCloudDbAt = Date.now();
@@ -2336,7 +2394,12 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
                 }
             });
             window.addEventListener('beforeunload', stopDataRefresh);
-            await fetchRemoteDatabase();
+            if (requiresAccessKey() && !getLiveQuoteAccessKey()) {
+                showWelcomeWaitingForKey();
+                showAccessKeyModal();
+            } else {
+                await fetchRemoteDatabase();
+            }
         };
     </script>
 </body>
