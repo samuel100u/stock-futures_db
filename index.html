@@ -277,6 +277,18 @@
                         <div class="ml-2 text-slate-400 text-xs font-medium">排除金融股</div>
                     </label>
                 </div>
+
+                <div class="col-span-1 sm:col-span-2 lg:col-span-5 border-t border-slate-800 pt-4 mt-1">
+                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">即時報價 API 金鑰</label>
+                    <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <input type="password" id="param-access-key" autocomplete="off" placeholder="輸入金鑰後儲存，將寫入 Cookie" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                        <div class="flex gap-2 shrink-0">
+                            <button type="button" onclick="saveAccessKeyFromSettings()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">儲存金鑰</button>
+                            <button type="button" onclick="clearAccessKeyFromSettings()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm font-semibold transition">清除</button>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1.5">金鑰存於本機 Cookie，用於連線即時報價代理；清除後需重新輸入。</p>
+                </div>
             </div>
         </section>
 
@@ -439,6 +451,20 @@
     </div>
 
     <div id="toast" class="fixed bottom-6 right-6 left-6 md:left-auto md:w-auto bg-blue-600 text-white px-6 py-3 rounded-xl shadow-2xl shadow-blue-900/40 transition-all translate-y-20 opacity-0 z-50 flex items-center justify-center md:justify-start gap-3"><i data-lucide="info" size="18"></i> <span id="toast-msg" class="text-sm font-medium"></span></div>
+
+    <!-- API 金鑰 Modal（首次或清除後） -->
+    <div id="access-key-modal" class="modal-overlay">
+        <div class="modal-container p-6 glass-card shadow-2xl max-w-md" onclick="event.stopPropagation()">
+            <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="key-round" class="text-amber-400" size="22"></i>
+                <h3 class="text-lg font-bold text-slate-100">輸入 API 金鑰</h3>
+            </div>
+            <p class="text-sm text-slate-400 mb-4">請輸入即時報價代理金鑰。儲存後寫入 Cookie，下次開啟無需再輸入。</p>
+            <input type="password" id="access-key-modal-input" autocomplete="off" placeholder="API 金鑰" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white mb-4 focus:border-blue-500 outline-none">
+            <p id="access-key-modal-error" class="hidden text-sm text-rose-400 mb-3"></p>
+            <button type="button" onclick="submitAccessKeyModal()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold transition">確認並啟用即時報價</button>
+        </div>
+    </div>
 
     <!-- CB 詳細資料 Modal -->
     <div id="cb-modal" class="modal-overlay" onclick="closeCbModal(event)">
@@ -932,6 +958,8 @@
          * 留空則改為定期重拉下方 GITHUB_DB_URL 的 ZIP。
          */
         const LIVE_QUOTE_API_BASE = 'https://stock-crawer.pages.dev';
+        const ACCESS_KEY_COOKIE_NAME = 'live_quote_access_key';
+        const ACCESS_KEY_COOKIE_DAYS = 365;
         const GITHUB_DB_URL = 'https://raw.githubusercontent.com/samuel100u/stock-futures_db/main/market.db.zip';
         /** GitHub Pages 且未設 Worker 時，重拉雲端 DB 間隔（毫秒）；0 = 關閉 */
         const GITHUB_DB_REFRESH_MS = 120000;
@@ -949,11 +977,113 @@
             return null;
         }
 
-        function liveQuoteEndpoint(url) {
+        function getLiveQuoteAccessKey() {
+            const m = document.cookie.match(new RegExp('(?:^|; )' + ACCESS_KEY_COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+            return m ? decodeURIComponent(m[1]) : '';
+        }
+
+        function setLiveQuoteAccessKey(key) {
+            const val = (key || '').trim();
+            if (!val) {
+                clearLiveQuoteAccessKey();
+                return;
+            }
+            const maxAge = ACCESS_KEY_COOKIE_DAYS * 86400;
+            document.cookie = `${ACCESS_KEY_COOKIE_NAME}=${encodeURIComponent(val)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+            syncAccessKeyInputs(val);
+        }
+
+        function clearLiveQuoteAccessKey() {
+            document.cookie = `${ACCESS_KEY_COOKIE_NAME}=; path=/; max-age=0; SameSite=Lax`;
+            syncAccessKeyInputs('');
+        }
+
+        function syncAccessKeyInputs(key) {
+            const v = key !== undefined ? key : getLiveQuoteAccessKey();
+            const settings = document.getElementById('param-access-key');
+            if (settings) settings.value = v;
+        }
+
+        function showAccessKeyModal(message) {
+            const modal = document.getElementById('access-key-modal');
+            const err = document.getElementById('access-key-modal-error');
+            const input = document.getElementById('access-key-modal-input');
+            if (!modal) return;
+            if (err) {
+                if (message) {
+                    err.textContent = message;
+                    err.classList.remove('hidden');
+                } else {
+                    err.textContent = '';
+                    err.classList.add('hidden');
+                }
+            }
+            if (input && !input.value) input.value = getLiveQuoteAccessKey();
+            modal.classList.add('active');
+            lucide.createIcons();
+            setTimeout(() => input?.focus(), 100);
+        }
+
+        function hideAccessKeyModal() {
+            document.getElementById('access-key-modal')?.classList.remove('active');
+            document.getElementById('access-key-modal-error')?.classList.add('hidden');
+        }
+
+        function applyAccessKeyAndStartLive(key) {
+            setLiveQuoteAccessKey(key);
+            hideAccessKeyModal();
+            stopDataRefresh();
+            if (db && getLiveQuoteApiBase()) {
+                startLiveQuotePolling();
+                showToast('API 金鑰已儲存，即時報價已啟用');
+            }
+        }
+
+        window.submitAccessKeyModal = () => {
+            const input = document.getElementById('access-key-modal-input');
+            const key = (input?.value || '').trim();
+            if (!key) {
+                showAccessKeyModal('請輸入金鑰');
+                return;
+            }
+            applyAccessKeyAndStartLive(key);
+        };
+
+        window.saveAccessKeyFromSettings = () => {
+            const input = document.getElementById('param-access-key');
+            const key = (input?.value || '').trim();
+            if (!key) {
+                showToast('請輸入金鑰');
+                return;
+            }
+            applyAccessKeyAndStartLive(key);
+        };
+
+        window.clearAccessKeyFromSettings = () => {
+            clearLiveQuoteAccessKey();
+            stopLiveQuotePolling();
+            if (getLiveQuoteApiBase()) {
+                document.getElementById('db-status').innerHTML = `<i data-lucide="key-round" class="text-amber-500" size="14"></i> 請輸入 API 金鑰以啟用即時報價`;
+                lucide.createIcons();
+                showAccessKeyModal();
+            }
+            showToast('已清除 API 金鑰');
+        };
+
+        function buildProxyApiUrl(path) {
             const base = getLiveQuoteApiBase();
-            if (!base) return url;
-            if (url.includes('all-quote-info')) return `${base}/api/quotes-futures`;
-            if (url.includes('all-stock-futures-list')) return `${base}/api/futures`;
+            if (!base) return null;
+            const key = getLiveQuoteAccessKey();
+            if (!key) return null;
+            const u = new URL(path.startsWith('/') ? path : `/${path}`, base);
+            u.searchParams.set('key', key);
+            return u.toString();
+        }
+
+        function liveQuoteEndpoint(url) {
+            if (!getLiveQuoteApiBase()) return url;
+            if (url.includes('all-quote-info')) return buildProxyApiUrl('/api/quotes-futures');
+            if (url.includes('all-stock-futures-list')) return buildProxyApiUrl('/api/futures');
             return url;
         }
 
@@ -961,6 +1091,9 @@
             const msg = err?.message || String(err);
             if (msg === 'Failed to fetch' || msg.includes('NetworkError')) {
                 return `無法連線代理（CORS／503）：請重新部署 Cloudflare Pages 的 pages-proxy/_worker.js。測試：${fetchUrl}`;
+            }
+            if (msg.includes('HTTP 401')) {
+                return 'API 金鑰錯誤或未提供（HTTP 401），請在設定中重新輸入金鑰';
             }
             if (msg.includes('HTTP 404')) {
                 return `代理 API 404，請重新部署 Cloudflare Pages（需含 _worker.js）。測試：${fetchUrl}`;
@@ -975,9 +1108,10 @@
         }
 
         async function fetchProxyJson(path) {
-            const base = getLiveQuoteApiBase();
-            if (!base) throw new Error('LIVE_QUOTE_API_BASE 未設定');
-            const resp = await fetch(`${base}${path}`, { cache: 'no-store', mode: 'cors' });
+            const fetchUrl = buildProxyApiUrl(path);
+            if (!getLiveQuoteApiBase()) throw new Error('LIVE_QUOTE_API_BASE 未設定');
+            if (!fetchUrl) throw new Error('請先輸入 API 金鑰');
+            const resp = await fetch(fetchUrl, { cache: 'no-store', mode: 'cors' });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const data = await resp.json();
             if (data && data.error) throw new Error(data.error);
@@ -1235,6 +1369,9 @@
                 if (liveQuoteFailStreak <= 2 || liveQuoteFailStreak % 6 === 0) {
                     console.error('Live quote refresh failed:', e);
                 }
+                if ((e.message || '').includes('401') || (e.message || '').includes('金鑰')) {
+                    showAccessKeyModal(e.message);
+                }
                 setLiveQuoteStatus('err', e.message);
             } finally {
                 liveQuoteInFlight = false;
@@ -1254,7 +1391,7 @@
                 clearTimeout(liveQuoteSessionTimerId);
                 liveQuoteSessionTimerId = null;
             }
-            if (!db || !getLiveQuoteApiBase()) return;
+            if (!db || !getLiveQuoteApiBase() || !getLiveQuoteAccessKey()) return;
 
             if (isActiveTradingSession()) {
                 liveQuoteOffSessionDone = false;
@@ -1358,6 +1495,12 @@
         function startDataRefresh() {
             stopDataRefresh();
             if (getLiveQuoteApiBase()) {
+                if (!getLiveQuoteAccessKey()) {
+                    document.getElementById('db-status').innerHTML = `<i data-lucide="key-round" class="text-amber-500" size="14"></i> 請輸入 API 金鑰以啟用即時報價`;
+                    lucide.createIcons();
+                    showAccessKeyModal();
+                    return;
+                }
                 startLiveQuotePolling();
             } else if ((isGitHubPages() || location.protocol === 'file:') && GITHUB_DB_REFRESH_MS > 0) {
                 lastCloudDbAt = Date.now();
@@ -2173,6 +2316,14 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
                     });
                 }
             });
+
+            syncAccessKeyInputs();
+            const modalKeyInput = document.getElementById('access-key-modal-input');
+            if (modalKeyInput) {
+                modalKeyInput.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') submitAccessKeyModal();
+                });
+            }
 
             lucide.createIcons();
             document.addEventListener('visibilitychange', () => {
