@@ -1,4 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+@source "../../index.html";
+@source "../**/*.{js,html}";
         
         :root {
             --bg-main: #020617;
