@@ -2,8 +2,12 @@ import initSqlJs from 'sql.js/dist/sql-wasm.js'
 import Chart from 'chart.js/auto'
 import TomSelect from 'tom-select'
 import JSZip from 'jszip'
-import { createIcons } from 'lucide'
+import { createIcons, icons } from 'lucide'
 import 'tom-select/dist/css/tom-select.default.min.css'
+
+function refreshIcons() {
+  createIcons({ icons })
+}
 
 const sqlPromise = initSqlJs({
   locateFile: () => import.meta.env.BASE_URL + 'sql-wasm.wasm',
@@ -279,7 +283,7 @@ export function renderSpotPullbackSection() {
             </td>`;
         tableBody.appendChild(tr);
     });
-    createIcons();
+    refreshIcons();
 }
 
 /** 每 10 秒即時 tick：重算當日 universe（含最新成交量）並完整重繪回落清單 */
@@ -539,7 +543,7 @@ export function showWelcomeWaitingForKey() {
         icon.classList.remove('animate-spin', 'text-blue-400', 'text-rose-400');
         icon.classList.add('text-amber-400');
     }
-    createIcons();
+    refreshIcons();
 }
 
 export function showWelcomeLoading() {
@@ -556,7 +560,7 @@ export function showWelcomeLoading() {
         icon.classList.add('animate-spin', 'text-blue-400');
         icon.classList.remove('text-amber-400', 'text-rose-400');
     }
-    createIcons();
+    refreshIcons();
 }
 
 export function resetDashboardToKeyGate() {
@@ -614,7 +618,7 @@ export function showAccessKeyModal(message) {
     }
     if (input && !input.value) input.value = getLiveQuoteAccessKey();
     modal.classList.add('active');
-    createIcons();
+    refreshIcons();
     setTimeout(() => input?.focus(), 100);
 }
 
@@ -941,7 +945,7 @@ export function setLiveQuoteStatus(state, detail, { silent = false } = {}) {
         el.dataset.liveQuoteOk = '';
         el.innerHTML = `<i data-lucide="alert-circle" class="text-amber-500" size="14"></i> 即時報價失敗${detail ? `：${detail}` : ''}`;
     }
-    createIcons();
+    refreshIcons();
 }
 
 export async function refreshLiveQuotes() {
@@ -1038,7 +1042,7 @@ export function setCloudDbStatus(state, detail) {
     } else {
         el.innerHTML = `<i data-lucide="alert-circle" class="text-amber-500" size="14"></i> 雲端 DB 同步失敗${detail ? `：${detail}` : ''}`;
     }
-    createIcons();
+    refreshIcons();
 }
 
 export async function fetchMarketDbUint8() {
@@ -1238,7 +1242,7 @@ export function renderFavoritesSection() {
         body.innerHTML = '';
         wrap?.classList.add('hidden');
         empty?.classList.remove('hidden');
-        createIcons();
+        refreshIcons();
         return;
     }
 
@@ -1279,7 +1283,7 @@ export function renderFavoritesSection() {
             </td>`;
         body.appendChild(tr);
     });
-    createIcons();
+    refreshIcons();
 }
 
 export function patchFavoritesSectionLive() {
@@ -1347,7 +1351,7 @@ export function renderBlacklist() {
             <i data-lucide="x" size="12" class="cursor-pointer" onclick="removeFromBlacklist('${b.id}')"></i>
         </div>
     `).join('');
-    createIcons();
+    refreshIcons();
 }
 
 // CB 相關功能
@@ -1404,7 +1408,7 @@ export function showCbDetail(stockId) {
     });
     
     document.getElementById('cb-modal').classList.add('active');
-    createIcons();
+    refreshIcons();
 }
 
 export function closeCbModal(e) {
@@ -1502,7 +1506,7 @@ export async function refreshPunishData() {
                     </td>`;
                 container.appendChild(tr);
             });
-            createIcons();
+            refreshIcons();
         }
     } catch (e) {
         loading.classList.add('hidden'); empty.innerHTML = `<span class="text-rose-400">連線失敗</span><br><small class="text-slate-600">證交所連線限制中</small>`; empty.classList.remove('hidden');
@@ -1581,7 +1585,7 @@ export async function loadDatabase(uint8Array) {
         startDataRefresh();
         renderFavoritesSection();
         showToast("數據同步成功");
-        createIcons();
+        refreshIcons();
     } catch (err) { console.error("WASM Load Error:", err); showToast("資料庫引擎載入失敗"); }
 }
 
@@ -1606,7 +1610,7 @@ export async function fetchRemoteDatabase() {
         document.getElementById('loading-icon').classList.remove('animate-spin', 'text-blue-400');
         document.getElementById('loading-icon').classList.add('text-rose-400');
         showToast(isUnsupportedZip ? "ZIP 壓縮格式不支援，請用 Deflate 重新上傳" : "無法獲取雲端資料，請檢查網路連線");
-        createIcons();
+        refreshIcons();
     }
 }
 
@@ -1702,7 +1706,7 @@ export function processOverview() {
         tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td><td class="px-3 md:px-4 py-3.5"><div class="flex items-center gap-2.5"><span class="strong-mini-candle shrink-0">${miniCandle}</span><div class="min-w-0"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></div></div></td><td class="strong-col-price px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="strong-col-spot-amp px-3 md:px-4 py-3.5 text-right text-sky-300 font-mono font-semibold text-sm" style="font-variant-numeric:tabular-nums">${formatSpotAmplitude(v.id)}</td><td class="strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${gainSign}${(v.gain*100).toFixed(2)}%</td><td class="strong-col-metric px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition" title="看圖"><i data-lucide="line-chart" size="16"></i></button>${favBtn}<button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
         tableBody.appendChild(tr);
     });
-    createIcons();
+    refreshIcons();
 
     const tagCounts = {};
     validStocks.forEach(v => {
@@ -1769,7 +1773,7 @@ export function processSurgeAnalysis() {
             tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium max-w-[10rem] truncate" title="${item.tags}">${item.tags}</td><td class="text-right font-mono text-slate-300">${formatVolumeK(item.hist)}</td><td class="text-right font-bold text-yellow-400 text-sm">${formatVolumeK(item.recent)}</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition" title="看圖"><i data-lucide="eye" size="14"></i></button>${favBtn}<button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></div></td>`;
             tableBody.appendChild(tr);
         });
-        createIcons();
+        refreshIcons();
     }
 }
 
@@ -2088,7 +2092,7 @@ export async function initApp() {
         });
     }
 
-    createIcons();
+    refreshIcons();
     document.addEventListener('visibilitychange', () => {
         if (document.hidden || !db) return;
         if (getLiveQuoteApiBase()) {
