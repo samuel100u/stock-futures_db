@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>股市數據分析儀表板 - 智慧自動版</title>
+    <script  src="https://cdn.tailwindcss.com"></script>
+  <script type="module" crossorigin src="/stock-futures_db/assets/index-CYoBqT_A.js"></script>
+  <link rel="stylesheet" crossorigin href="/stock-futures_db/assets/index-DPBKz9n7.css">
+</head>
+<body class="p-3 md:p-8" data-active-tab="overview" data-mode="volume">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="flex flex-col md:flex-row md:items-center justify-between mb-4 md:mb-6 gap-4">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold flex items-center gap-2">
+                    <i data-lucide="layout-dashboard" class="text-blue-500"></i>
+                    <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">股市分析儀表板</span>
+                </h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <div id="db-status" class="text-xs text-slate-500 flex items-center gap-2">
+                    <i data-lucide="cloud-download" size="14"></i> 自動同步數據中...
+                </div>
+            </div>
+        </header>
+
+        <!-- 設定面板 -->
+        <section id="settings-panel" class="hidden glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl mb-6 border-blue-900/50">
+            <div class="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 border-b pb-4 border-slate-800">
+                <div class="flex items-center gap-4">
+                    <div class="flex items-center gap-2"><i data-lucide="settings-2" class="text-blue-400" size="18"></i><h2 class="text-base md:text-lg font-bold text-slate-200">即時分析參數</h2></div>
+                    
+                    <div id="mode-toggle-wrapper">
+                        <div class="mode-switch-container" id="mode-selector">
+                            <div class="mode-slider"></div>
+                            <div class="mode-option active" data-val="volume">成交量</div>
+                            <div class="mode-option" data-val="value">成交金額</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-xs text-slate-500 italic flex items-center gap-1">
+                    <i data-lucide="info" size="12"></i> 參數更動將自動更新結果
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6">
+                <div><label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">截止日期</label><input type="date" id="param-deadline" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 outline-none text-sm text-white"></div>
+                
+                <!-- 概況專屬 -->
+                <div class="param-group param-overview"><label id="gain-threshold-label" class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">漲幅門檻 (%)</label><input type="number" id="param-change-pct" value="3" step="0.5" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></div>
+                <div class="param-group param-overview"><label id="overview-threshold-label" class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">最低成交量</label><input type="number" id="param-min-threshold-overview" value="1000" step="1000" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></div>
+                <div class="param-group param-overview"><label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">分析天數(排序/漲幅)</label><input type="number" id="param-avg-days-overview" value="1" min="1" max="60" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></div>
+
+                <!-- 監控專屬 -->
+                <div class="param-group param-surge"><label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">爆發門檻 (倍)</label><input type="number" id="param-surge-ratio" value="1.5" step="0.1" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></div>
+                <div class="param-group param-surge"><label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">監控比對天數</label><input type="number" id="param-recent-days" value="10" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></div>
+                <div class="param-group param-surge"><label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">近期均量最小值</label><input type="number" id="param-min-avg-vol" value="2000" step="100" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white"></div>
+                
+                <div class="flex items-center gap-4 pt-1 md:pt-6 col-span-1 sm:col-span-2">
+                    <label class="flex items-center cursor-pointer group">
+                        <input type="checkbox" id="param-exclude-etf" class="sr-only" checked onchange="handleFilterToggle()">
+                        <div class="relative w-9 h-5 bg-slate-800 border border-slate-700 rounded-full transition">
+                            <div class="dot absolute left-0.5 top-0.5 bg-slate-400 w-3.5 h-3.5 rounded-full transition"></div>
+                        </div>
+                        <div class="ml-2 text-slate-400 text-xs font-medium">排除 ETF</div>
+                    </label>
+                    <label class="flex items-center cursor-pointer group ml-4">
+                        <input type="checkbox" id="param-exclude-finance" class="sr-only" checked onchange="handleFilterToggle()">
+                        <div class="relative w-9 h-5 bg-slate-800 border border-slate-700 rounded-full transition">
+                            <div class="dot absolute left-0.5 top-0.5 bg-slate-400 w-3.5 h-3.5 rounded-full transition"></div>
+                        </div>
+                        <div class="ml-2 text-slate-400 text-xs font-medium">排除金融股</div>
+                    </label>
+                </div>
+
+                <div class="col-span-1 sm:col-span-2 lg:col-span-5 border-t border-slate-800 pt-4 mt-1">
+                    <label class="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wider">即時報價 API 金鑰</label>
+                    <div class="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <input type="password" id="param-access-key" autocomplete="off" placeholder="輸入金鑰後儲存，將寫入 Cookie" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white">
+                        <div class="flex gap-2 shrink-0">
+                            <button type="button" onclick="saveAccessKeyFromSettings()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition">儲存金鑰</button>
+                            <button type="button" onclick="clearAccessKeyFromSettings()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg text-sm font-semibold transition">清除</button>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mt-1.5">金鑰存於本機 Cookie，用於連線即時報價代理；清除後需重新輸入。</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 頁籤選單 -->
+        <nav class="flex gap-4 md:gap-8 border-b border-slate-800 mb-6 px-1 overflow-x-auto no-scrollbar">
+            <button class="tab-btn active py-3 px-1 text-sm md:text-base transition whitespace-nowrap" data-tab="overview">市場概況</button>
+            <button class="tab-btn py-3 px-1 text-sm md:text-base transition flex items-center gap-2 whitespace-nowrap" data-tab="surge"><i data-lucide="zap" size="14"></i> 量能異動監控</button>
+            <button class="tab-btn py-3 px-1 text-sm md:text-base transition flex items-center gap-2 whitespace-nowrap" data-tab="punish"><i data-lucide="alert-circle" size="14"></i> 處置股監控</button>
+        </nav>
+
+        <div id="welcome-screen" class="glass-card rounded-2xl md:rounded-3xl p-8 md:p-12 text-center">
+            <div class="inline-flex p-3 md:p-4 bg-blue-900/30 text-blue-400 rounded-full mb-4 md:mb-6"><i id="loading-icon" data-lucide="loader" class="animate-spin" size="32"></i></div>
+            <h2 id="welcome-title" class="text-xl md:text-2xl font-bold text-slate-200 mb-2 md:mb-4">正在同步雲端數據...</h2>
+            <p id="welcome-subtitle" class="text-slate-500 text-sm max-w-xs mx-auto">請稍候，正在從 GitHub 獲取最新市場資料。</p>
+        </div>
+
+        <div id="dashboard-content" class="hidden space-y-4 md:space-y-8">
+            <!-- 黑名單管理列 -->
+            <div id="blacklist-bar" class="hidden glass-card p-3 rounded-xl border-dashed border-slate-700 flex flex-wrap items-center gap-3">
+                <div class="text-xs font-bold text-slate-500 flex items-center gap-1">
+                    <i data-lucide="eye-off" size="14"></i> 已隱藏標的:
+                </div>
+                <div id="blacklist-tags" class="flex flex-wrap gap-2">
+                    <!-- 動態插入標籤 -->
+                </div>
+                <button onclick="clearBlacklist()" class="text-[10px] text-slate-600 hover:text-rose-400 ml-auto underline">全部恢復顯示</button>
+            </div>
+
+            <div id="favorites-section" class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl border border-pink-900/40">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                    <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                        <i data-lucide="heart" class="text-pink-400"></i> 我的最愛
+                        <span id="favorites-count-badge" class="text-[10px] md:text-xs font-normal text-slate-500">0 檔</span>
+                    </h4>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="addFavoriteFromSelector()" class="bg-pink-600/15 hover:bg-pink-600/30 text-pink-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-pink-500/30 flex items-center gap-2 transition">
+                            <i data-lucide="plus" size="14"></i> 加入目前選股
+                        </button>
+                        <button type="button" onclick="copyFavoritesList()" class="bg-slate-700/40 hover:bg-slate-600/50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-600/50 flex items-center gap-2 transition">
+                            <i data-lucide="copy" size="14"></i> 複製清單
+                        </button>
+                    </div>
+                </div>
+                <div id="favorites-empty" class="text-slate-500 text-sm text-center py-8">尚無最愛標的，請在清單中點擊 <i data-lucide="heart" size="14" class="inline text-pink-400"></i> 或從下方選股加入</div>
+                <div id="favorites-table-wrap" class="scrollable-table border border-slate-800 rounded-xl hidden">
+                    <table class="stock-table w-full text-left text-sm md:text-base">
+                        <thead class="sticky top-0 z-10">
+                            <tr>
+                                <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-right">期貨 / 現貨</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-right">漲跌幅</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-right">成交量</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="favorites-table-body" class="divide-y divide-slate-800"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
+                <div class="glass-card p-3 md:p-6 rounded-xl md:rounded-2xl border-l-4 border-blue-600"><p class="text-slate-500 text-[10px] md:text-sm font-semibold uppercase">標的總數</p><h3 id="stat-stocks" class="text-lg md:text-2xl font-bold text-white">--</h3></div>
+                <div class="glass-card p-3 md:p-6 rounded-xl md:rounded-2xl border-l-4 border-emerald-600"><p class="text-slate-500 text-[10px] md:text-sm font-semibold uppercase">基準日</p><h3 id="stat-date" class="text-xs md:text-xl font-bold text-white truncate">--</h3></div>
+                <div class="glass-card p-3 md:p-6 rounded-xl md:rounded-2xl border-l-4 border-amber-600"><p id="stat-vol-label" class="text-slate-500 text-[10px] md:text-sm font-semibold uppercase">基準日成交量</p><h3 id="stat-volume" class="text-lg md:text-2xl font-bold text-white">--</h3></div>
+                <div class="glass-card p-3 md:p-6 rounded-xl md:rounded-2xl border-l-4 border-rose-600"><p class="text-slate-500 text-[10px] md:text-sm font-semibold uppercase">強勢標的數</p><h3 id="stat-strong" class="text-lg md:text-2xl font-bold text-white">--</h3></div>
+            </div>
+
+            <!-- 市場概況分頁 -->
+            <div id="tab-overview" class="tab-content active space-y-4 md:space-y-8">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-8">
+                    <div class="lg:col-span-2 glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3">
+                            <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                                <i data-lucide="list" class="text-rose-500"></i> 強勢標的清單
+                                <span id="overview-db-date" class="text-[10px] md:text-xs font-normal text-slate-500 ml-1"></span>
+                            </h4>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button onclick="copyOverviewStockList()" class="bg-slate-700/40 hover:bg-slate-600/50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-600/50 flex items-center gap-2 transition">
+                                    <i data-lucide="copy" size="14"></i> 複製清單
+                                </button>
+                                <button onclick="copyOverviewPrompt()" class="bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-indigo-500/30 flex items-center gap-2 transition">
+                                    <i data-lucide="copy" size="14"></i> 複製 AI 分析 Prompt
+                                </button>
+                            </div>
+                        </div>
+                        <div class="scrollable-table border border-slate-800 rounded-xl">
+                            <table class="stock-table w-full text-left text-sm md:text-base">
+                                <thead class="sticky top-0 z-10">
+                                    <tr>
+                                        <th class="px-2 md:px-3 py-3 font-bold text-center w-10">#</th>
+                                        <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
+                                        <th class="px-3 md:px-4 py-3 font-bold text-right">期貨 / 現貨</th>
+                                        <th class="px-3 md:px-4 py-3 font-bold text-right">現貨震幅</th>
+                                        <th id="th-dynamic-gain" class="px-3 md:px-4 py-3 font-bold text-right">漲跌幅</th>
+                                        <th id="th-dynamic-metric" class="px-3 md:px-4 py-3 font-bold text-right">成交量</th>
+                                        <th class="px-3 md:px-4 py-3 font-bold text-center">看圖</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="strong-table-body" class="divide-y divide-slate-800"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
+                        <h4 class="text-base md:text-lg font-bold text-slate-200 mb-4 flex items-center gap-2"><i data-lucide="list-ordered" class="text-emerald-400"></i> 題材排行</h4>
+                        <div id="tag-rank-list" class="scrollable-table text-sm">
+                            <div class="text-slate-500 text-center py-8">尚無資料</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 md:mb-6 gap-3">
+                        <div>
+                            <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                                <i data-lucide="trending-down" class="text-amber-400"></i> 全期貨 · 現貨自高點回落
+                            </h4>
+                            <p class="text-slate-500 text-xs md:text-sm mt-1">基準日當日、符合最低成交量等參數的全部期貨（不看漲幅門檻／分析天數），現貨自高點回落 ≥ 4%</p>
+                        </div>
+                        <div id="spot-pullback-count-badge" class="bg-amber-600/15 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-lg text-xs font-bold">-- 筆符合</div>
+                    </div>
+                    <div class="scrollable-table border border-slate-800 rounded-xl">
+                        <table class="stock-table w-full text-left text-sm md:text-base">
+                            <thead class="sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 md:px-3 py-3 font-bold text-center w-10">#</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold text-right">現貨 / 最高</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold text-right">回落幅度</th>
+                                    <th class="px-3 md:px-4 py-3 font-bold text-center">看圖</th>
+                                </tr>
+                            </thead>
+                            <tbody id="spot-pullback-table-body" class="divide-y divide-slate-800"></tbody>
+                        </table>
+                    </div>
+                    <div id="spot-pullback-empty" class="hidden p-8 text-center text-slate-500 text-sm">暫無符合條件之標的（需等即時現貨報價載入）</div>
+                </div>
+            </div>
+
+            <!-- 量能異動監控分頁 -->
+            <div id="tab-surge" class="tab-content space-y-4 md:space-y-8">
+                <div class="bg-gradient-to-br from-indigo-900 to-slate-900 rounded-2xl md:rounded-3xl p-4 md:p-8 text-white shadow-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border border-indigo-800/30">
+                    <div><h4 class="text-lg md:text-xl font-bold mb-1 flex items-center gap-2"><i data-lucide="activity" class="text-indigo-400"></i> 量能異常篩選</h4><p id="surge-desc" class="text-slate-400 text-xs md:text-sm">近期均量 vs 基準日前回推一年的歷史平均。</p></div>
+                    <div class="flex items-center gap-3"><div id="surge-count-badge" class="bg-blue-600/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-lg text-xs font-bold">-- 筆符合</div><button onclick="copySurgePrompt()" class="bg-white/10 hover:bg-white/20 text-white px-4 py-1.5 rounded-lg text-xs font-bold border border-white/20 flex items-center gap-2 transition"><i data-lucide="copy" size="14"></i> 複製 AI 分析 Prompt</button></div>
+                </div>
+                <div class="glass-card rounded-2xl md:rounded-3xl overflow-hidden shadow-sm"><div class="scrollable-table"><table class="w-full text-left text-xs md:text-sm"><thead class="sticky top-0 z-10"><tr><th class="px-4 py-3 font-bold">標的名稱</th><th class="px-4 py-3 font-bold">題材</th><th class="px-4 py-3 font-bold text-right">歷史均量 (1y)</th><th class="px-4 py-3 font-bold text-right">近期均量</th><th class="px-4 py-3 font-bold text-right">倍數</th><th class="px-4 py-3 font-bold text-center">看圖</th></tr></thead><tbody id="surge-table-body" class="divide-y divide-slate-800"></tbody></table></div><div id="surge-empty" class="p-8 text-center text-slate-500 text-sm">暫無符合條件之數據</div></div>
+            </div>
+
+            <!-- 處置股監控分頁 -->
+            <div id="tab-punish" class="tab-content space-y-4 md:space-y-8">
+                <div class="bg-gradient-to-br from-rose-900 to-slate-900 rounded-2xl md:rounded-3xl p-4 md:p-8 text-white shadow-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border border-rose-800/30">
+                    <div>
+                        <h4 class="text-lg md:text-xl font-bold mb-1 flex items-center gap-2"><i data-lucide="alert-octagon" class="text-rose-400"></i> 即時處置標的</h4>
+                        <p class="text-slate-400 text-xs md:text-sm">數據來源：TWSE 證交所公告 (查詢區間：近一個月)。</p>
+                    </div>
+                    <button onclick="refreshPunishData()" class="bg-white/10 hover:bg-white/20 text-white px-5 py-2 rounded-lg text-xs font-bold border border-white/20 flex items-center gap-2 transition">
+                        <i data-lucide="refresh-ccw" size="14"></i> 重新整理
+                    </button>
+                </div>
+                <div class="glass-card rounded-2xl md:rounded-3xl overflow-hidden shadow-sm">
+                    <div class="scrollable-table">
+                        <table class="w-full text-left text-xs md:text-sm">
+                            <thead class="sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 md:px-4 py-3 font-bold">標的</th>
+                                    <th class="px-2 md:px-4 py-3 font-bold">剩餘</th>
+                                    <th class="hidden md:table-cell px-2 md:px-4 py-3 font-bold">處置期間</th>
+                                    <th class="px-2 md:px-4 py-3 font-bold">措施摘要</th>
+                                    <th class="px-2 md:px-4 py-3 font-bold text-center">看圖</th>
+                                </tr>
+                            </thead>
+                            <tbody id="punish-table-body" class="divide-y divide-slate-800"></tbody>
+                        </table>
+                    </div>
+                    <div id="punish-loading" class="p-12 text-center text-slate-500 hidden">
+                        <i data-lucide="loader" class="animate-spin inline-block mr-2"></i> 正在獲取最新資料...
+                    </div>
+                    <div id="punish-empty" class="p-12 text-center text-slate-500">尚無正在處置中之標的</div>
+                </div>
+            </div>
+
+            <!-- 個股價量回測（市場概況 / 量能異動 / 處置股共用，切換分頁不隱藏） -->
+            <div id="shared-stock-analysis" class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl">
+                <div class="flex flex-col md:flex-row md:items-start justify-between mb-4 gap-4 border-b border-slate-800 pb-4 md:pb-6">
+                    <div class="flex-1 min-w-0">
+                        <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                            <i data-lucide="search" class="text-blue-400"></i> 個股價量回測分析
+                        </h4>
+                        <div id="stock-analysis-meta" class="mt-3 text-sm text-slate-400">請選擇標的查看價量與題材</div>
+                    </div>
+                    <div class="w-full md:w-72 md:flex-shrink-0">
+                        <select id="stock-selector" placeholder="搜尋代碼或名稱..."></select>
+                    </div>
+                </div>
+                <div class="chart-container" style="height: 350px;"><canvas id="priceChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-6 right-6 left-6 md:left-auto md:w-auto bg-blue-600 text-white px-6 py-3 rounded-xl shadow-2xl shadow-blue-900/40 transition-all translate-y-20 opacity-0 z-50 flex items-center justify-center md:justify-start gap-3"><i data-lucide="info" size="18"></i> <span id="toast-msg" class="text-sm font-medium"></span></div>
+
+    <!-- API 金鑰 Modal（首次或清除後） -->
+    <div id="access-key-modal" class="modal-overlay">
+        <div class="modal-container p-6 glass-card shadow-2xl max-w-md" onclick="event.stopPropagation()">
+            <div class="flex items-center gap-2 mb-2">
+                <i data-lucide="key-round" class="text-amber-400" size="22"></i>
+                <h3 class="text-lg font-bold text-slate-100">輸入 API 金鑰</h3>
+            </div>
+            <p class="text-sm text-slate-400 mb-4">請輸入 API 金鑰。驗證後將載入市場資料並啟用即時報價；金鑰存於 Cookie，下次無需再輸入。</p>
+            <input type="password" id="access-key-modal-input" autocomplete="off" placeholder="API 金鑰" class="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white mb-4 focus:border-blue-500 outline-none">
+            <p id="access-key-modal-error" class="hidden text-sm text-rose-400 mb-3"></p>
+            <button type="button" onclick="submitAccessKeyModal()" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold transition">確認並載入資料</button>
+        </div>
+    </div>
+
+    <!-- CB 詳細資料 Modal -->
+    <div id="cb-modal" class="modal-overlay" onclick="closeCbModal(event)">
+        <div class="modal-container p-6 glass-card shadow-2xl" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                <h3 class="text-xl font-bold text-emerald-400 flex items-center gap-2">
+                    <i data-lucide="info" size="20"></i> 可轉債詳細資料
+                </h3>
+                <button onclick="closeCbModal()" class="text-slate-400 hover:text-white transition">
+                    <i data-lucide="x" size="24"></i>
+                </button>
+            </div>
+            <div id="cb-modal-content" class="space-y-4">
+                <!-- 動態插入內容 -->
+            </div>
+            <div class="mt-8 pt-4 border-t border-slate-800 text-right">
+                <button onclick="closeCbModal()" class="bg-slate-800 hover:bg-slate-700 text-white px-6 py-2 rounded-xl font-semibold transition">關閉</button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
