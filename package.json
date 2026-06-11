@@ -1,0 +1,21 @@
+{
+  "name": "stock-futures-dashboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "postinstall": "node scripts/copy-sql-wasm.cjs"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.7",
+    "jszip": "^3.10.1",
+    "lucide": "^0.468.0",
+    "sql.js": "^1.12.0",
+    "tom-select": "^2.3.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.3"
+  }
+}
