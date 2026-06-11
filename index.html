@@ -333,9 +333,14 @@
                                 <i data-lucide="list" class="text-rose-500"></i> 強勢標的清單
                                 <span id="overview-db-date" class="text-[10px] md:text-xs font-normal text-slate-500 ml-1"></span>
                             </h4>
-                            <button onclick="copyOverviewPrompt()" class="bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-indigo-500/30 flex items-center gap-2 transition">
-                                <i data-lucide="copy" size="14"></i> 複製 AI 分析 Prompt
-                            </button>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <button onclick="copyOverviewStockList()" class="bg-slate-700/40 hover:bg-slate-600/50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-600/50 flex items-center gap-2 transition">
+                                    <i data-lucide="copy" size="14"></i> 複製清單
+                                </button>
+                                <button onclick="copyOverviewPrompt()" class="bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-indigo-500/30 flex items-center gap-2 transition">
+                                    <i data-lucide="copy" size="14"></i> 複製 AI 分析 Prompt
+                                </button>
+                            </div>
                         </div>
                         <div class="scrollable-table border border-slate-800 rounded-xl">
                             <table class="stock-table w-full text-left text-sm md:text-base">
@@ -2318,6 +2323,13 @@ ${stockLine}
 ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
         }
 
+        function copyOverviewStockList() {
+            const list = filterPromptStocks(currentStrongList);
+            if (!list.length) return showToast("無強勢清單");
+            const text = list.map(s => `${s.id} ${formatPromptName(s.name)}`).join(', ');
+            copyToClipboard(text, '清單已複製！');
+        }
+
         function copyOverviewPrompt() {
             const promptList = filterPromptStocks(currentStrongList);
             if (!promptList.length) return showToast("無強勢清單");
@@ -2338,7 +2350,7 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
             const stockLine = promptList.map(s => `${s.id} ${formatPromptName(s.name)} (爆發 ${s.ratio.toFixed(2)} 倍)`).join(', ');
             copyToClipboard(buildSurgePromptTemplate(analysisDate, newsSearchStart, newsSearchEnd, stockLine, promptList.length));
         }
-        function copyToClipboard(text) { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); showToast("指令已複製！"); }
+        function copyToClipboard(text, toastMsg = '指令已複製！') { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t); showToast(toastMsg); }
         window.viewStock = (id) => {
             if (stockSelectInstance) stockSelectInstance.setValue(id);
             else updatePriceTrend(id);
