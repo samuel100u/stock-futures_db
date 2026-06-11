@@ -125,6 +125,8 @@
         /* 黑名單樣式 */
         .blacklist-item { background: rgba(30, 41, 59, 0.5); border: 1px solid var(--border-color); padding: 2px 8px; border-radius: 99px; font-size: 11px; display: flex; align-items: center; gap: 4px; color: var(--text-muted); }
         .blacklist-item:hover { border-color: var(--accent-red); color: var(--accent-red); }
+        .fav-toggle-btn.is-fav { color: #f472b6 !important; }
+        .fav-toggle-btn.is-fav svg { fill: currentColor; }
 
         /* Modal 樣式 */
         .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.8); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
@@ -317,6 +319,38 @@
                 <button onclick="clearBlacklist()" class="text-[10px] text-slate-600 hover:text-rose-400 ml-auto underline">全部恢復顯示</button>
             </div>
 
+            <div id="favorites-section" class="glass-card p-4 md:p-6 rounded-2xl md:rounded-3xl border border-pink-900/40">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3">
+                    <h4 class="text-base md:text-lg font-bold text-slate-200 flex items-center gap-2">
+                        <i data-lucide="heart" class="text-pink-400"></i> 我的最愛
+                        <span id="favorites-count-badge" class="text-[10px] md:text-xs font-normal text-slate-500">0 檔</span>
+                    </h4>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button type="button" onclick="addFavoriteFromSelector()" class="bg-pink-600/15 hover:bg-pink-600/30 text-pink-300 px-3 py-1.5 rounded-lg text-xs font-bold border border-pink-500/30 flex items-center gap-2 transition">
+                            <i data-lucide="plus" size="14"></i> 加入目前選股
+                        </button>
+                        <button type="button" onclick="copyFavoritesList()" class="bg-slate-700/40 hover:bg-slate-600/50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-600/50 flex items-center gap-2 transition">
+                            <i data-lucide="copy" size="14"></i> 複製清單
+                        </button>
+                    </div>
+                </div>
+                <div id="favorites-empty" class="text-slate-500 text-sm text-center py-8">尚無最愛標的，請在清單中點擊 <i data-lucide="heart" size="14" class="inline text-pink-400"></i> 或從下方選股加入</div>
+                <div id="favorites-table-wrap" class="scrollable-table border border-slate-800 rounded-xl hidden">
+                    <table class="stock-table w-full text-left text-sm md:text-base">
+                        <thead class="sticky top-0 z-10">
+                            <tr>
+                                <th class="px-3 md:px-4 py-3 font-bold">標的名稱</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-right">期貨 / 現貨</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-right">漲跌幅</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-right">成交量</th>
+                                <th class="px-3 md:px-4 py-3 font-bold text-center">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="favorites-table-body" class="divide-y divide-slate-800"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
                 <div class="glass-card p-3 md:p-6 rounded-xl md:rounded-2xl border-l-4 border-blue-600"><p class="text-slate-500 text-[10px] md:text-sm font-semibold uppercase">標的總數</p><h3 id="stat-stocks" class="text-lg md:text-2xl font-bold text-white">--</h3></div>
                 <div class="glass-card p-3 md:p-6 rounded-xl md:rounded-2xl border-l-4 border-emerald-600"><p class="text-slate-500 text-[10px] md:text-sm font-semibold uppercase">基準日</p><h3 id="stat-date" class="text-xs md:text-xl font-bold text-white truncate">--</h3></div>
@@ -503,6 +537,24 @@
         let currentStrongList = [], currentPullbackUniverse = [], currentSurgeList = [], currentReferenceDate = "", currentReferenceTimestamp = 0;
         let currentAnalysisPeriodStart = 0, currentAvgDays = 1;
         let blacklist = JSON.parse(localStorage.getItem('stock_blacklist') || '[]');
+        const FAVORITES_COOKIE_NAME = 'stock_favorites';
+        const FAVORITES_COOKIE_DAYS = 365;
+
+        function loadFavoritesFromCookie() {
+            const m = document.cookie.match(new RegExp('(?:^|; )' + FAVORITES_COOKIE_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+            if (!m) return [];
+            try {
+                const arr = JSON.parse(decodeURIComponent(m[1]));
+                return Array.isArray(arr) ? arr.filter(f => f && f.id) : [];
+            } catch { return []; }
+        }
+
+        function saveFavoritesToCookie() {
+            const maxAge = FAVORITES_COOKIE_DAYS * 86400;
+            document.cookie = `${FAVORITES_COOKIE_NAME}=${encodeURIComponent(JSON.stringify(favorites))}; path=/; max-age=${maxAge}; SameSite=Lax`;
+        }
+
+        let favorites = loadFavoritesFromCookie();
         // 💎 修復：確保 getParams 在腳本最頂部定義，且具備安全性檢查
         function getParams() {
             const d = document.getElementById('param-deadline')?.value;
@@ -727,6 +779,7 @@
                 const rank = i + 1;
                 const rankClass = rank <= 3 ? 'stock-rank rank-top' : 'stock-rank';
                 const miniCandle = formatSpotMiniCandle(v.id);
+                const favBtn = formatFavoriteBtn(v.id, v.name);
                 tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td>
                     <td class="px-3 md:px-4 py-3.5">
                         <div class="flex items-center gap-2.5">
@@ -740,7 +793,10 @@
                     <td class="spot-pullback-col-price px-3 md:px-4 py-3.5 text-right">${formatSpotPriceHighCell(v.id)}</td>
                     <td class="spot-pullback-col-pct px-3 md:px-4 py-3.5 text-right font-bold text-base text-amber-300" style="font-variant-numeric:tabular-nums">${formatSpotPullbackPct(v.pullback)}</td>
                     <td class="px-3 md:px-4 py-3.5 text-center">
-                        <button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button>
+                        <div class="flex items-center justify-center gap-1">
+                            <button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition" title="看圖"><i data-lucide="line-chart" size="16"></i></button>
+                            ${favBtn}
+                        </div>
                     </td>`;
                 tableBody.appendChild(tr);
             });
@@ -937,6 +993,7 @@
 
         function applyLiveQuoteTick() {
             patchStrongTableLive();
+            patchFavoritesSectionLive();
             refreshSpotPullbackSectionOnTick();
             patchOverviewStatsLive();
             const sid = stockSelectInstance?.getValue() || '';
@@ -1622,6 +1679,143 @@
             } catch (e) { console.error("分析錯誤:", e); showToast("分析執行出錯"); }
         }
 
+        function isFavorite(id) {
+            return favorites.some(f => f.id === id);
+        }
+
+        function formatFavoriteBtn(id, name) {
+            const fav = isFavorite(id);
+            const safeName = JSON.stringify(name || '');
+            return `<button type="button" data-fav-btn data-stock-id="${escapeHtml(id)}" onclick="toggleFavorite('${escapeHtml(id)}', ${safeName})" class="fav-toggle-btn p-2 hover:bg-pink-500/20 ${fav ? 'is-fav text-pink-400' : 'text-slate-500 hover:text-pink-400'} rounded-full transition" title="${fav ? '移出最愛' : '加入最愛'}"><i data-lucide="heart" size="16"></i></button>`;
+        }
+
+        function updateFavoriteButtonStates() {
+            document.querySelectorAll('[data-fav-btn][data-stock-id]').forEach(btn => {
+                const on = isFavorite(btn.dataset.stockId);
+                btn.classList.toggle('is-fav', on);
+                btn.classList.toggle('text-pink-400', on);
+                btn.classList.toggle('text-slate-500', !on);
+                btn.title = on ? '移出最愛' : '加入最愛';
+            });
+        }
+
+        function addToFavorites(id, name) {
+            if (!id || isFavorite(id)) return false;
+            favorites.push({ id, name: name || id });
+            saveFavoritesToCookie();
+            renderFavoritesSection();
+            updateFavoriteButtonStates();
+            showToast(`已加入最愛 ${id} ${name || ''}`);
+            return true;
+        }
+
+        function removeFromFavorites(id) {
+            const item = favorites.find(f => f.id === id);
+            if (!item) return;
+            favorites = favorites.filter(f => f.id !== id);
+            saveFavoritesToCookie();
+            renderFavoritesSection();
+            updateFavoriteButtonStates();
+            showToast(`已移出最愛 ${id}`);
+        }
+
+        window.toggleFavorite = (id, name) => {
+            if (isFavorite(id)) removeFromFavorites(id);
+            else addToFavorites(id, name);
+        };
+
+        window.addFavoriteFromSelector = () => {
+            const id = stockSelectInstance?.getValue() || '';
+            if (!id) return showToast('請先選擇標的');
+            const quote = getStockLatestQuote(id);
+            const name = quote?.name || id;
+            if (!addToFavorites(id, name)) showToast('已在最愛清單中');
+        };
+
+        function renderFavoritesSection() {
+            const body = document.getElementById('favorites-table-body');
+            const wrap = document.getElementById('favorites-table-wrap');
+            const empty = document.getElementById('favorites-empty');
+            const badge = document.getElementById('favorites-count-badge');
+            if (!body) return;
+
+            if (badge) badge.textContent = `${favorites.length} 檔`;
+
+            if (!favorites.length) {
+                body.innerHTML = '';
+                wrap?.classList.add('hidden');
+                empty?.classList.remove('hidden');
+                lucide.createIcons();
+                return;
+            }
+
+            wrap?.classList.remove('hidden');
+            empty?.classList.add('hidden');
+
+            const p = getParams();
+            body.innerHTML = '';
+            favorites.forEach(f => {
+                const quote = db ? getStockLatestQuote(f.id) : null;
+                const miniCandle = formatSpotMiniCandle(f.id);
+                const gain = quote?.gain ?? 0;
+                const gainClass = gain >= 0 ? 'text-rose-400' : 'text-emerald-400';
+                const gainSign = gain >= 0 ? '+' : '';
+                const close = quote?.close ?? '--';
+                const metric = quote ? formatStockLiveMetric(quote, p.mode) : '--';
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-800 transition';
+                tr.dataset.stockId = f.id;
+                tr.innerHTML = `
+                    <td class="px-3 md:px-4 py-3.5">
+                        <div class="flex items-center gap-2.5">
+                            <span class="fav-mini-candle shrink-0">${miniCandle}</span>
+                            <div class="min-w-0">
+                                <div class="stock-code">${escapeHtml(f.id)}</div>
+                                <div class="stock-name">${escapeHtml(f.name)}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="fav-col-price px-3 md:px-4 py-3.5 text-right">${quote ? formatFuturesSpotPriceCell(f.id, close) : '--'}</td>
+                    <td class="fav-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${quote ? `${gainSign}${(gain * 100).toFixed(2)}%` : '--'}</td>
+                    <td class="fav-col-metric px-3 md:px-4 py-3.5 text-right text-yellow-400 font-bold text-base" style="font-variant-numeric:tabular-nums">${metric}</td>
+                    <td class="px-3 md:px-4 py-3.5 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                            <button type="button" onclick="viewStock('${escapeHtml(f.id)}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition" title="看圖"><i data-lucide="line-chart" size="16"></i></button>
+                            <button type="button" onclick="removeFromFavorites('${escapeHtml(f.id)}')" class="p-2 hover:bg-pink-500/20 text-pink-400 rounded-full transition" title="移出最愛"><i data-lucide="heart-off" size="16"></i></button>
+                        </div>
+                    </td>`;
+                body.appendChild(tr);
+            });
+            lucide.createIcons();
+        }
+
+        function patchFavoritesSectionLive() {
+            if (!favorites.length) return;
+            const p = getParams();
+            document.querySelectorAll('#favorites-table-body tr[data-stock-id]').forEach(tr => {
+                const id = tr.dataset.stockId;
+                const miniEl = tr.querySelector('.fav-mini-candle');
+                if (miniEl) miniEl.innerHTML = formatSpotMiniCandle(id);
+                const quote = getStockLatestQuote(id);
+                if (!quote) return;
+                const priceTd = tr.querySelector('.fav-col-price');
+                if (priceTd) priceTd.innerHTML = formatFuturesSpotPriceCell(id, quote.close);
+                const gainTd = tr.querySelector('.fav-col-gain');
+                if (gainTd) {
+                    gainTd.className = `fav-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${quote.gain >= 0 ? 'text-rose-400' : 'text-emerald-400'}`;
+                    gainTd.textContent = `${quote.gain >= 0 ? '+' : ''}${(quote.gain * 100).toFixed(2)}%`;
+                }
+                const metricTd = tr.querySelector('.fav-col-metric');
+                if (metricTd) metricTd.textContent = formatStockLiveMetric(quote, p.mode);
+            });
+        }
+
+        function copyFavoritesList() {
+            if (!favorites.length) return showToast('尚無最愛標的');
+            const text = favorites.map(f => `${f.id} ${f.name}`).join(', ');
+            copyToClipboard(text, '最愛清單已複製！');
+        }
+
         // 黑名單管理
         function addToBlacklist(id, name) {
             if (!blacklist.find(b => b.id === id)) {
@@ -1891,6 +2085,7 @@
                     document.getElementById('db-status').innerHTML = `<i data-lucide="check-circle" class="text-emerald-500" size="14"></i> 雲端數據已同步`;
                 }
                 startDataRefresh();
+                renderFavoritesSection();
                 showToast("數據同步成功");
                 lucide.createIcons();
             } catch (err) { console.error("WASM Load Error:", err); showToast("資料庫引擎載入失敗"); }
@@ -2009,7 +2204,8 @@
                 const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${v.id}')">CB</span>` : '';
 
                 const miniCandle = formatSpotMiniCandle(v.id);
-                tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td><td class="px-3 md:px-4 py-3.5"><div class="flex items-center gap-2.5"><span class="strong-mini-candle shrink-0">${miniCandle}</span><div class="min-w-0"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></div></div></td><td class="strong-col-price px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="strong-col-spot-amp px-3 md:px-4 py-3.5 text-right text-sky-300 font-mono font-semibold text-sm" style="font-variant-numeric:tabular-nums">${formatSpotAmplitude(v.id)}</td><td class="strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${gainSign}${(v.gain*100).toFixed(2)}%</td><td class="strong-col-metric px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition"><i data-lucide="line-chart" size="16"></i></button><button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
+                const favBtn = formatFavoriteBtn(v.id, v.name);
+                tr.innerHTML = `<td class="px-2 md:px-3 py-3.5 ${rankClass}">${rank}</td><td class="px-3 md:px-4 py-3.5"><div class="flex items-center gap-2.5"><span class="strong-mini-candle shrink-0">${miniCandle}</span><div class="min-w-0"><div class="flex items-center"><div class="stock-code">${v.id}</div>${cbBadge}</div><div class="stock-name">${v.name}</div></div></div></td><td class="strong-col-price px-3 md:px-4 py-3.5 text-right">${formatFuturesSpotPriceCell(v.id, v.close)}</td><td class="strong-col-spot-amp px-3 md:px-4 py-3.5 text-right text-sky-300 font-mono font-semibold text-sm" style="font-variant-numeric:tabular-nums">${formatSpotAmplitude(v.id)}</td><td class="strong-col-gain px-3 md:px-4 py-3.5 text-right font-bold text-base ${gainClass}">${gainSign}${(v.gain*100).toFixed(2)}%</td><td class="strong-col-metric px-3 md:px-4 py-3.5 text-right ${p.mode === 'value' ? 'text-emerald-400' : 'text-yellow-400'} font-bold text-base" style="font-variant-numeric:tabular-nums">${displayMetric}</td><td class="px-3 md:px-4 py-3.5 text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${v.id}')" class="p-2 hover:bg-blue-600/20 text-blue-400 rounded-full transition" title="看圖"><i data-lucide="line-chart" size="16"></i></button>${favBtn}<button onclick="addToBlacklist('${v.id}', '${v.name}')" class="p-2 hover:bg-rose-500/20 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="16"></i></button></div></td>`;
                 tableBody.appendChild(tr);
             });
             lucide.createIcons();
@@ -2075,7 +2271,8 @@
                     const cbInfo = getCbInfo(item.id);
                     const cbBadge = cbInfo ? `<span class="badge-cb ml-1" onclick="showCbDetail('${item.id}')">CB</span>` : '';
 
-                    tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium max-w-[10rem] truncate" title="${item.tags}">${item.tags}</td><td class="text-right font-mono text-slate-300">${formatVolumeK(item.hist)}</td><td class="text-right font-bold text-yellow-400 text-sm">${formatVolumeK(item.recent)}</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition"><i data-lucide="eye" size="14"></i></button><button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></td>`;
+                    const favBtn = formatFavoriteBtn(item.id, item.name);
+                    tr.innerHTML = `<td><div class="flex items-center"><div class="font-bold text-slate-100 text-sm md:text-base">${item.id}</div>${cbBadge}</div><div class="text-xs text-slate-400 font-medium">${item.name}</div></td><td class="text-sm text-slate-300 font-medium max-w-[10rem] truncate" title="${item.tags}">${item.tags}</td><td class="text-right font-mono text-slate-300">${formatVolumeK(item.hist)}</td><td class="text-right font-bold text-yellow-400 text-sm">${formatVolumeK(item.recent)}</td><td class="text-right"><span class="${item.ratio >= 2 ? 'badge-red' : 'text-yellow-500 font-bold'} text-sm">${item.ratio.toFixed(2)}x</span></td><td class="text-center"><div class="flex items-center justify-center gap-1"><button onclick="viewStock('${item.id}')" class="p-2 text-blue-400 hover:bg-blue-900/30 rounded-full transition" title="看圖"><i data-lucide="eye" size="14"></i></button>${favBtn}<button onclick="addToBlacklist('${item.id}', '${item.name}')" class="p-2 text-slate-500 hover:text-rose-400 rounded-full transition" title="隱藏標的"><i data-lucide="eye-off" size="14"></i></button></div></td>`;
                     tableBody.appendChild(tr);
                 });
                 lucide.createIcons();
@@ -2388,6 +2585,7 @@ ${buildPromptGroupRulesBlock(newsSearchStart, newsSearchEnd, stockCount)}`;
             });
 
             syncAccessKeyInputs();
+            renderFavoritesSection();
             const modalKeyInput = document.getElementById('access-key-modal-input');
             if (modalKeyInput) {
                 modalKeyInput.addEventListener('keydown', e => {
