@@ -499,18 +499,15 @@ const QUOTE_SESSION_END = { h: 13, m: 45 };
 const WANTGOO_QUOTES_URL = 'https://www.wantgoo.com/investrue/all-quote-info';
 const WANTGOO_FUTURES_URL = 'https://www.wantgoo.com/futures/all-stock-futures-list';
 /**
- * 即時報價代理（本機 file://、GitHub Pages 皆用此網址，免本機 server）。
- * 留空則改為定期重拉下方 GITHUB_DB_URL 的 ZIP。
+ * Cloudflare Worker 代理（即時報價 + market.db.zip，需 API 金鑰）。
  */
 const LIVE_QUOTE_API_BASE = 'https://stock-crawer.pages.dev';
+
 const ACCESS_KEY_COOKIE_NAME = 'live_quote_access_key';
 const ACCESS_KEY_COOKIE_DAYS = 365;
-const GITHUB_DB_URL = 'https://raw.githubusercontent.com/samuel100u/stock-futures_db/main/market.db.zip';
-/** GitHub Pages 且未設 Worker 時，重拉雲端 DB 間隔（毫秒）；0 = 關閉 */
-const GITHUB_DB_REFRESH_MS = 120000;
 
-let liveQuoteTimerId = null, liveQuoteSessionTimerId = null, cloudDbTimerId = null, futuresMapCache = null;
-let liveQuoteInFlight = false, cloudDbInFlight = false, lastLiveQuoteAt = 0, lastCloudDbAt = 0;
+let liveQuoteTimerId = null, liveQuoteSessionTimerId = null, futuresMapCache = null;
+let liveQuoteInFlight = false, lastLiveQuoteAt = 0;
 let liveQuoteOffSessionDone = false, lastFullAnalyzeAt = 0, priceChartStockId = null, liveQuoteSyncedOnce = false, liveQuoteFailStreak = 0;
 
 export function isGitHubPages() {
@@ -554,7 +551,7 @@ export function showWelcomeLoading() {
         title.innerText = '正在同步雲端數據...';
         title.classList.remove('text-rose-400');
     }
-    if (subtitle) subtitle.innerText = '請稍候，正在從 GitHub 獲取最新市場資料。';
+    if (subtitle) subtitle.innerText = '請稍候，正在從雲端獲取最新市場資料。';
     if (icon) {
         icon.setAttribute('data-lucide', 'loader');
         icon.classList.add('animate-spin', 'text-blue-400');
@@ -1029,25 +1026,14 @@ export function stopLiveQuotePolling() {
     }
 }
 
-export function setCloudDbStatus(state, detail) {
-    const el = document.getElementById('db-status');
-    if (!el) return;
-    const timeStr = lastCloudDbAt
-        ? new Date(lastCloudDbAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        : '';
-    if (state === 'loading') {
-        el.innerHTML = `<i data-lucide="loader-2" class="text-blue-400 animate-spin" size="14"></i> 同步雲端 DB…`;
-    } else if (state === 'ok') {
-        el.innerHTML = `<i data-lucide="cloud" class="text-emerald-500" size="14"></i> 雲端 DB ${timeStr}${detail ? ` · ${detail}` : ''}`;
-    } else {
-        el.innerHTML = `<i data-lucide="alert-circle" class="text-amber-500" size="14"></i> 雲端 DB 同步失敗${detail ? `：${detail}` : ''}`;
-    }
-    refreshIcons();
-}
-
 export async function fetchMarketDbUint8() {
-    const response = await fetch(`${GITHUB_DB_URL}?v=${Date.now()}`, { cache: 'no-store' });
-    if (!response.ok) throw new Error('網路請求失敗');
+    const fetchUrl = buildProxyApiUrl('/api/market-db');
+    if (!getLiveQuoteApiBase()) throw new Error('LIVE_QUOTE_API_BASE 未設定');
+    if (!fetchUrl) throw new Error('請先輸入 API 金鑰');
+    const u = new URL(fetchUrl);
+    u.searchParams.set('v', String(Date.now()));
+    const response = await fetch(u.toString(), { cache: 'no-store', mode: 'cors' });
+    if (!response.ok) throw new Error('HTTP ' + response.status);
     const buffer = await response.arrayBuffer();
     const zip = await JSZip.loadAsync(buffer);
     const entry = findMarketDbEntry(zip);
@@ -1070,51 +1056,15 @@ export async function applyDatabaseBytes(uint8, { isFirstLoad = false } = {}) {
     if (sid) updatePriceTrend(sid);
 }
 
-export async function refreshCloudDatabase({ silent = false } = {}) {
-    if (!db || cloudDbInFlight || document.hidden) return;
-    cloudDbInFlight = true;
-    try {
-        if (!silent) setCloudDbStatus('loading');
-        const uint8 = await fetchMarketDbUint8();
-        await applyDatabaseBytes(uint8);
-        lastCloudDbAt = Date.now();
-        setCloudDbStatus('ok', '已更新');
-    } catch (e) {
-        console.error('Cloud DB refresh failed:', e);
-        if (!silent) setCloudDbStatus('err', e.message);
-    } finally {
-        cloudDbInFlight = false;
-    }
-}
-
-export function startCloudDbPolling() {
-    stopCloudDbPolling();
-    cloudDbTimerId = setInterval(() => refreshCloudDatabase({ silent: true }), GITHUB_DB_REFRESH_MS);
-}
-
-export function stopCloudDbPolling() {
-    if (cloudDbTimerId) {
-        clearInterval(cloudDbTimerId);
-        cloudDbTimerId = null;
-    }
-}
-
-/** 有代理 → 即時報價；否則 → 定期重拉雲端 DB（file:// / GitHub Pages） */
+/** 啟動即時報價輪詢（DB 僅在初次載入時透過 Worker 下載一次） */
 export function startDataRefresh() {
     stopDataRefresh();
-    if (getLiveQuoteApiBase()) {
-        if (!getLiveQuoteAccessKey() || !db) return;
-        startLiveQuotePolling();
-    } else if ((isGitHubPages() || location.protocol === 'file:') && GITHUB_DB_REFRESH_MS > 0) {
-        lastCloudDbAt = Date.now();
-        setCloudDbStatus('ok', `每 ${Math.round(GITHUB_DB_REFRESH_MS / 1000)} 秒同步`);
-        startCloudDbPolling();
-    }
+    if (!getLiveQuoteApiBase() || !getLiveQuoteAccessKey() || !db) return;
+    startLiveQuotePolling();
 }
 
 export function stopDataRefresh() {
     stopLiveQuotePolling();
-    stopCloudDbPolling();
 }
 
 export function formatVolumeK(vol) {
@@ -1603,13 +1553,15 @@ export async function fetchRemoteDatabase() {
         await loadDatabase(uint8);
     } catch (err) {
         console.error("Fetch DB Error:", err);
+        const fetchUrl = buildProxyApiUrl('/api/market-db');
+        const msg = formatLiveQuoteError(err, fetchUrl || '/api/market-db');
         const isUnsupportedZip = String(err?.message || err).includes("compression");
         document.getElementById('welcome-title').innerText = "數據同步失敗";
         document.getElementById('welcome-title').classList.add('text-rose-400');
         document.getElementById('loading-icon').setAttribute('data-lucide', 'alert-triangle');
         document.getElementById('loading-icon').classList.remove('animate-spin', 'text-blue-400');
         document.getElementById('loading-icon').classList.add('text-rose-400');
-        showToast(isUnsupportedZip ? "ZIP 壓縮格式不支援，請用 Deflate 重新上傳" : "無法獲取雲端資料，請檢查網路連線");
+        showToast(isUnsupportedZip ? "ZIP 壓縮格式不支援，請用 Deflate 重新上傳" : msg);
         refreshIcons();
     }
 }
@@ -2095,11 +2047,9 @@ export async function initApp() {
     refreshIcons();
     document.addEventListener('visibilitychange', () => {
         if (document.hidden || !db) return;
-        if (getLiveQuoteApiBase()) {
+        if (getLiveQuoteApiBase() && getLiveQuoteAccessKey()) {
             if (isActiveTradingSession()) refreshLiveQuotes();
             else if (!liveQuoteOffSessionDone) refreshLiveQuotes();
-        } else if ((isGitHubPages() || location.protocol === 'file:') && GITHUB_DB_REFRESH_MS > 0) {
-            refreshCloudDatabase({ silent: true });
         }
     });
     window.addEventListener('beforeunload', stopDataRefresh);

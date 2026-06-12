@@ -1,1 +1,1 @@
-export { getStockLatestQuote, loadDatabase, findMarketDbEntry, fetchRemoteDatabase, fetchMarketDbUint8, applyDatabaseBytes, refreshCloudDatabase, getCbInfo, ensureFuturesMap, upsertQuotesToMemoryDb } from '../dashboard.js'
+export { getStockLatestQuote, loadDatabase, findMarketDbEntry, fetchRemoteDatabase, fetchMarketDbUint8, applyDatabaseBytes, getCbInfo, ensureFuturesMap, upsertQuotesToMemoryDb } from '../dashboard.js'
