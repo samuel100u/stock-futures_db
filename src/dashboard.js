@@ -362,7 +362,9 @@ export function updateStockAnalysisMeta(stockId) {
     el.innerHTML = `<div class="flex flex-wrap items-center gap-2 mb-1">
         <span class="stock-meta-code font-bold text-slate-100 text-base">${escapeHtml(stockId)}</span>
         ${name ? `<span class="text-slate-400">${escapeHtml(name)}</span>` : ''}
+        ${formatFavoriteBtn(stockId)}
     </div>${priceHtml}<div class="flex flex-wrap gap-1.5 mt-2">${tagHtml}</div>`;
+    refreshIcons();
 }
 
 export function patchStockAnalysisLive(stockId) {
